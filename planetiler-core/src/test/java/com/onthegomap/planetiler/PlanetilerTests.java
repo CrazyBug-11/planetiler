@@ -2473,6 +2473,83 @@ class PlanetilerTests {
     }
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {
+    " --minzoom=13 --maxzoom=14 "
+      + " --output=G:\\数据\\1.六大类数据\\1.矢量\\parquet\\地类图斑_安康市\\FeatureEnvelope\\FeatureEnvelope.mbtiles "
+      + " --is_rasterize=true --pixelation_zoom=-1  --rasterize_min_zoom=0 --rasterize_max_zoom=13 --rasterize_area_threshold=4"
+      + " --outputType=mbtiles  --temp_nodes=F:\\test --temp_multipolygons=E:\\test --tile_weights=D:\\Project\\Java\\server-code\\src\\main\\resources\\planetiler\\tile_weights.tsv.gz  --force"
+//      + " -oosSavePath=E:\\Linespace\\SceneMapServer\\Data\\parquet --oosCorePoolSize=4 --oosMaxPoolSize=4 --bucketName=linespace --accessKey=linespace_test --secretKey=linespace_test --endpoint=http://123.139.158.75:9325 ",
+  })
+  void testPlanetilerRunnerParquetWithFeatureEnvelope(String args) throws Exception {
+    String basePath = "G:\\数据\\1.六大类数据\\1.矢量\\parquet\\地类图斑_安康市";
+    String tempDir = basePath + "\\FeatureEnvelope";
+    String outputPath = basePath + "\\FeatureEnvelope\\FeatureEnvelope.mbtiles";
+    List<Path> inputPaths = Stream.of(basePath + "\\地类图斑_安康市.parquet").map(Paths::get).toList();
+
+    Planetiler planetiler = Planetiler.create(Arguments.fromArgs(
+      (args + " --tmpdir=" + tempDir).split("\\s+")));
+    planetiler
+      .setProfile((source, features) -> {
+        FeatureCollector.Feature feature = features.anyGeometry("linespace_layer")
+          .setPixelToleranceAtAllZooms(0)
+          .setMinPixelSizeAtAllZooms(0);
+
+        double area;
+        try {
+          // v1.0 取真实面积
+          area = GeoUtils.calculateRealAreaLatLon(source.latLonGeometry());
+        } catch (Exception e) {
+          LOGGER.error("计算要素真实面积异常", e);
+          area = 0.0;
+        }
+
+        source.tags().forEach(feature::setAttr);
+        feature.setAttr(TileMergeRunnable.LINESPACE_AREA, area);
+      })
+      .addParquetSource("parquet", inputPaths, false, null, props -> props.get("linespace_layer"))
+      .setOutput(outputPath)
+      .run();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+    " --minzoom=13 --maxzoom=14 "
+      + " --output=G:\\数据\\1.六大类数据\\1.矢量\\parquet\\dltb\\FeatureRealArea\\FeatureRealArea.mbtiles "
+      + " --is_rasterize=true --pixelation_zoom=-1  --rasterize_min_zoom=0 --rasterize_max_zoom=13 --rasterize_area_threshold=4"
+      + " --outputType=mbtiles  --temp_nodes=F:\\test --temp_multipolygons=E:\\test --tile_weights=D:\\Project\\Java\\server-code\\src\\main\\resources\\planetiler\\tile_weights.tsv.gz  --force"
+//      + " -oosSavePath=E:\\Linespace\\SceneMapServer\\Data\\parquet --oosCorePoolSize=4 --oosMaxPoolSize=4 --bucketName=linespace --accessKey=linespace_test --secretKey=linespace_test --endpoint=http://123.139.158.75:9325 ",
+  })
+  void testPlanetilerRunnerParquetWithFeatureRealArea(String args) throws Exception {
+    String basePath = "G:\\数据\\1.六大类数据\\1.矢量\\parquet\\dltb";
+    String tempDir = basePath + "\\FeatureRealArea";
+    String outputPath = basePath + "\\FeatureRealArea\\FeatureRealArea.mbtiles";
+    List<Path> inputPaths = Stream.of(basePath + "\\dltb.parquet").map(Paths::get).toList();
+
+    Planetiler planetiler = Planetiler.create(Arguments.fromArgs(
+      (args + " --tmpdir=" + tempDir).split("\\s+")));
+    planetiler
+      .setProfile((source, features) -> {
+        FeatureCollector.Feature feature = features.anyGeometry("linespace_layer")
+          .setPixelToleranceAtAllZooms(0)
+          .setMinPixelSizeAtAllZooms(0);
+
+        double area;
+        try {
+          // v2.0 去包络框面积
+          area = GeoUtils.calculateRealAreaLatLon(source.latLonGeometry().getEnvelope());
+        } catch (Exception e) {
+          LOGGER.error("计算要素真实面积异常", e);
+          area = 0.0;
+        }
+
+        source.tags().forEach(feature::setAttr);
+        feature.setAttr(TileMergeRunnable.LINESPACE_AREA, area);
+      })
+      .addParquetSource("parquet", inputPaths, false, null, props -> props.get("linespace_layer"))
+      .setOutput(outputPath)
+      .run();
+  }
 
   @ParameterizedTest
   @ValueSource(strings = {

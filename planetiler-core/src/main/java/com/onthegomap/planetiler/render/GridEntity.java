@@ -13,6 +13,8 @@ public class GridEntity {
 
   private static final int EXTENT = 4096;
 
+  public static final int BUFFER = 64;
+
   // 创建GeometryFactory实例
   private static final GeometryFactory geometryFactory = JTSFactoryFinder.getGeometryFactory();
 
@@ -39,28 +41,33 @@ public class GridEntity {
   }
 
   private Geometry[][] generateVectorGrid() {
-    Geometry[][] grid = new Geometry[EXTENT][EXTENT];
-    for (int i = 0; i < EXTENT; i += gridWidth) {
-      for (int j = 0; j < EXTENT; j += gridWidth) {
+    int totalSize = EXTENT + 2 * BUFFER;
+    Geometry[][] grid = new Geometry[totalSize][totalSize];
+
+    int maxExtend = EXTENT + BUFFER;
+    for (int i = -BUFFER; i < maxExtend; i += gridWidth) {
+      for (int j = -BUFFER; j < maxExtend; j += gridWidth) {
+        int arrayI = i + BUFFER;
+        int arrayJ = j + BUFFER;
+
         if (gridWidth == 1) {
-          grid[i][j] = geometryFactory.createPoint(new Coordinate(i, j));
+          grid[arrayI][arrayJ] = geometryFactory.createPoint(new Coordinate(i, j));
         } else {
-          // 创建地理点
+          // 创建多边形
           MutableCoordinateSequence sequence = new MutableCoordinateSequence();
           int left = i;
           int up = j;
-          // 避免溢出，
-          int right = Math.min((i + gridWidth), EXTENT);
-          int down = Math.min((j + gridWidth), EXTENT);
+          int right = Math.min(i + gridWidth, maxExtend);
+          int down = Math.min(j + gridWidth, maxExtend);
           sequence.addPoint(left, up);
           sequence.addPoint(left, down);
           sequence.addPoint(right, down);
           sequence.addPoint(right, up);
           sequence.addPoint(left, up);
           if (left == right && up == down) {
-            grid[i][j] = geometryFactory.createPoint(new Coordinate(left, up));
+            grid[arrayI][arrayJ] = geometryFactory.createPoint(new Coordinate(left, up));
           } else {
-            grid[i][j] = geometryFactory.createPolygon(sequence);
+            grid[arrayI][arrayJ] = geometryFactory.createPolygon(sequence);
           }
         }
       }

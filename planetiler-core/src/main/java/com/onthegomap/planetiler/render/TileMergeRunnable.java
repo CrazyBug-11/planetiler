@@ -387,10 +387,14 @@ public class TileMergeRunnable implements Runnable {
     int gridWidth = gridEntity.getGridWidth();
     Geometry[][] vectorGrid = gridEntity.getVectorGrid();
 
-    for (int i = 0; i < EXTENT; i += gridWidth) {
-      for (int j = 0; j < EXTENT; j += gridWidth) {
+    int maxExtend = EXTENT + GridEntity.BUFFER;
+    for (int i = -GridEntity.BUFFER; i < maxExtend; i += gridWidth) {
+      for (int j = -GridEntity.BUFFER; j < maxExtend; j += gridWidth) {
+        int arrayI = i + GridEntity.BUFFER;
+        int arrayJ = j + GridEntity.BUFFER;
+
         // 获取网格
-        Geometry geometry = vectorGrid[i][j];
+        Geometry geometry = vectorGrid[arrayI][arrayJ];
         if (geometry == null) {
           continue;
         }
@@ -412,13 +416,12 @@ public class TileMergeRunnable implements Runnable {
 
           // 计算像素与要素的比值
           double areaRatio = gridArea / geometryWithTag.area;
-          Map<String, Object> tags = geometryWithTag.tags;
           Geometry gridGeometry;
           if (areaRatio < config.rasterizeAreaThreshold() || config.rasterizeMaxZoom() - 1 == z) {
             // TODO: 处理边界裁剪 当像素膨胀率小于指定值或者当前层级为栅格化最大层级时  直接使用单位大小的像素
             gridGeometry = geometry;
             GeometryWithTag resultGeom = new GeometryWithTag(geometryWithTag.layer, geometryWithTag.id,
-              tags, geometryWithTag.group, gridGeometry, geometryWithTag.size, geometryWithTag.area,
+              geometryWithTag.tags, geometryWithTag.group, gridGeometry, geometryWithTag.size, geometryWithTag.area,
               geometryWithTag.hash);
             result.add(resultGeom);
 
