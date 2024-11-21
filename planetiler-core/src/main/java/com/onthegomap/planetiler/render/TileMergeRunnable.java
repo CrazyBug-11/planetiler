@@ -50,6 +50,7 @@ public class TileMergeRunnable implements Runnable {
   private static final int DEFAULT_TILE_SIZE = 256;
   private static final double TILE_SCALE = 0.5d;
   public static final String LINESPACE_AREA = "Linespace_Area";
+  public static final String SHAPE_AREA = "Shape_Area";
   public static final String EXPAND_MAX = "expand_max";
 
   private static final int EXTENT = 4096;
@@ -225,13 +226,7 @@ public class TileMergeRunnable implements Runnable {
 //          new PrecisionModel(1d));
 
         if (!transformationGeom.isEmpty()) {
-          double shapeArea = Double.parseDouble(feature.getTag(LINESPACE_AREA).toString());
-          try {
-            if (feature.hasTag("Shape_Area")) {
-              shapeArea = Double.parseDouble(feature.getTag("Shape_Area").toString());
-            }
-          } catch (NumberFormatException ignore) {
-          }
+          double shapeArea = getShapeArea(feature, transformationGeom);
           GeometryWithTag geometryWithTags =
             new GeometryWithTag(feature.layer(), feature.id(), feature.tags(),
               feature.group(),
@@ -245,6 +240,23 @@ public class TileMergeRunnable implements Runnable {
         LOGGER.error("[processTile] {}", tileCoord, e);
       }
     }
+  }
+
+  private static double getShapeArea(VectorTile.Feature feature, Geometry transformationGeom) {
+    double shapeArea = transformationGeom.getArea();
+    try {
+      if (feature.hasTag(LINESPACE_AREA)) {
+        shapeArea = Double.parseDouble(feature.getTag(LINESPACE_AREA).toString());
+      }
+    } catch (NumberFormatException ignore) {
+    }
+    try {
+      if (feature.hasTag(SHAPE_AREA)) {
+        shapeArea = Double.parseDouble(feature.getTag(SHAPE_AREA).toString());
+      }
+    } catch (NumberFormatException ignore) {
+    }
+    return shapeArea;
   }
 
   /**
@@ -542,7 +554,7 @@ public class TileMergeRunnable implements Runnable {
     // 生成新的面数据
     Polygon polygon = new Polygon(new LinearRing(sequence, factory), new LinearRing[0], factory);
     allGeometries.add(
-      new GeometryWrapper(polygon, Double.parseDouble(feature.getTag("Shape_Area").toString()), feature,
+      new GeometryWrapper(polygon, Double.parseDouble(feature.getTag(SHAPE_AREA).toString()), feature,
         feature.geometry().commands().length));
   }
 
