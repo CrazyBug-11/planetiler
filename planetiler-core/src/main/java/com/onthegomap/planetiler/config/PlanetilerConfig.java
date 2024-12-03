@@ -1,5 +1,6 @@
 package com.onthegomap.planetiler.config;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.onthegomap.planetiler.archive.TileArchiveConfig;
 import com.onthegomap.planetiler.archive.TileCompression;
 import com.onthegomap.planetiler.collection.LongLongMap;
@@ -14,6 +15,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -93,7 +95,11 @@ public record PlanetilerConfig(
   ZoomFunction<Number> pixelationGridSizeOverrides,
   ZoomFunction<Number> minDistSizes,
   int featureSourceIdMultiplier,
-  double rasterizeAreaThreshold
+  double rasterizeAreaThreshold,
+  Map<String, Map<String, Integer>> priorityLevelsMap,
+  Map<String, Map<String, Integer>> zoomLevelsMap,
+  String sortField,
+  boolean isAsc
 ) {
 
   public static final int MIN_MINZOOM = 0;
@@ -207,6 +213,14 @@ public record PlanetilerConfig(
         Math.max(maxzoom, DEFAULT_MAXZOOM));
     Path tmpDir = arguments.file("tmpdir|tmp", "temp directory", Path.of("data", "tmp"));
 
+    Map<String, Map<String, Integer>> priorityLevelsMap = arguments.getObjectFromJson("priority_levels_map",
+      "数据保留优先级", new TypeReference<>() {});
+    Map<String, Map<String, Integer>> zoomLevelsMap = arguments.getObjectFromJson("zoom_levels_map", "数据展示层级",
+      new TypeReference<>() {});
+    String sortField = arguments.getString("sort_field", "排序字段, 优先级高于priorityLevelsMap", "");
+    boolean isAsc =
+      arguments.getBoolean("is_asc", "排序排序方式", true);
+
     return new PlanetilerConfig(
       // todo linespace
       oosThreadPoolExecutor,
@@ -307,8 +321,10 @@ public record PlanetilerConfig(
       arguments.file("tile_weights", "tsv.gz file with columns z,x,y,loads to generate weighted average tile size stat",
         tmpDir.resolveSibling("tile_weights.tsv.gz")),
       arguments.getDouble("max_point_buffer",
-        "Additional global limit for the max tile pixels to include points outside tile bounds of all layers. Set to a lower value to reduce tile size for " +
-          "clients that handle label collisions across tiles (most web and native clients). NOTE: Do not reduce if you need to support " +
+        "Additional global limit for the max tile pixels to include points outside tile bounds of all layers. Set to a lower value to reduce tile size for "
+          +
+          "clients that handle label collisions across tiles (most web and native clients). NOTE: Do not reduce if you need to support "
+          +
           "raster tile rendering",
         Double.POSITIVE_INFINITY),
       arguments.getBoolean("log_jts_exceptions", "Emit verbose details to debug JTS geometry errors", false),
@@ -337,7 +353,11 @@ public record PlanetilerConfig(
         "要素像素化阈值，当要素的面积与像素点的比值大于该值时，像素整个归属该要素；"
           + "当小于阈值时，计算要素与像素相交范围，获取范围的包络框，赋值要素属性；"
           + "小于最小像素点 1/4096 ，直接丢弃",
-        2)
+        2),
+      priorityLevelsMap,
+      zoomLevelsMap,
+      sortField,
+      isAsc
     );
   }
 
@@ -347,6 +367,11 @@ public record PlanetilerConfig(
 
   public double tolerance(int zoom) {
     return zoom >= maxzoomForRendering ? simplifyToleranceAtMaxZoom : simplifyToleranceBelowMaxZoom;
+  }
+
+  public Double getPixelToleranceAtZoom(int zoom) {
+    return zoom == maxzoomForRendering ? simplifyToleranceAtMaxZoom :
+      ZoomFunction.applyAsDoubleOrElse(simplifyToleranceOverrides, zoom, -1d);
   }
 
   public enum SmallFeatureStrategy {

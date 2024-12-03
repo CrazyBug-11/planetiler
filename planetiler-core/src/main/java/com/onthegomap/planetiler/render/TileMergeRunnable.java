@@ -1,7 +1,6 @@
 package com.onthegomap.planetiler.render;
 
 import static org.locationtech.jts.geom.LinearRing.MINIMUM_VALID_SIZE;
-import static org.locationtech.jts.operation.union.UnaryUnionOp.union;
 
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.VectorTile;
@@ -18,6 +17,7 @@ import com.onthegomap.planetiler.mbtiles.Mbtiles;
 import com.onthegomap.planetiler.stats.DefaultStats;
 import com.onthegomap.planetiler.util.CloseableIterator;
 import com.onthegomap.planetiler.util.Gzip;
+import com.onthegomap.planetiler.util.TagUtils;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,9 +41,7 @@ import org.locationtech.jts.geom.MultiLineString;
 import org.locationtech.jts.geom.MultiPoint;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.Polygon;
-import org.locationtech.jts.geom.TopologyException;
 import org.locationtech.jts.geom.util.AffineTransformation;
-import org.locationtech.jts.geom.util.GeometryFixer;
 import org.locationtech.jts.index.strtree.STRtree;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -143,8 +141,12 @@ public class TileMergeRunnable implements Runnable {
     this.writer = writer;
     this.config = config;
     this.gridEntity = gridEntity;
-    this.gridArea = GeoUtils.getGridGeographicArea(tileCoord.x(), tileCoord.y(), tileCoord.z(), EXTENT,
-      gridEntity.getGridWidth());
+    if (gridEntity != null) {
+      this.gridArea = GeoUtils.getGridGeographicArea(tileCoord.x(), tileCoord.y(), tileCoord.z(), EXTENT,
+        gridEntity.getGridWidth());
+    } else {
+      this.gridArea = 0.0d;
+    }
   }
 
   public TileCoord getTileCoord() {
@@ -253,13 +255,16 @@ public class TileMergeRunnable implements Runnable {
             }
 
             if (result.isEmpty()) {
-              simplifiedGeometry = handleEmptyGeometry(originalGeometry);
+//              simplifiedGeometry = handleEmptyGeometry(originalGeometry);
+              simplifiedGeometry = originalGeometry;
             } else {
-              simplifiedGeometry = originalGeometry.getFactory().createMultiLineString(result.toArray(new LineString[0]));
+              simplifiedGeometry = originalGeometry.getFactory()
+                .createMultiLineString(result.toArray(new LineString[0]));
             }
 
           } else if (simplifiedGeometry instanceof LineString) {
-            simplifiedGeometry = handleEmptyGeometry(originalGeometry);
+//            simplifiedGeometry = handleEmptyGeometry(originalGeometry);
+            simplifiedGeometry = originalGeometry;
           }
         }
 
@@ -320,6 +325,11 @@ public class TileMergeRunnable implements Runnable {
    */
   private double getDistanceTolerance() {
     int z = tileCoord.z();
+    double tolerance = config.getPixelToleranceAtZoom(z);
+    if (tolerance != -1d) {
+      return tolerance;
+    }
+
     if (z >= 14) {
       return 0d;
     } else if (z >= 12) {
@@ -603,34 +613,106 @@ public class TileMergeRunnable implements Runnable {
             }
           }
         });
-        List<Integer> sortLength = set.stream().sorted(Comparator.comparingDouble(x -> list.get(x).length())).toList();
-        if (!sortLength.isEmpty()) {
-          GeometryWithTag geometryWithTag = list.get(sortLength.getLast());
-          // v1.0 裁剪要素会出现断裂情况
-//            GeometryClipper clipper = new GeometryClipper(geometry.getEnvelopeInternal());
-//            Geometry gridGeometry = clipper.clip(geometryWithTag.geometry(), false);
-//
-//            if (gridGeometry == null || Geometry.TYPENAME_MULTIPOINT.equalsIgnoreCase(gridGeometry.getGeometryType())
-//              || Geometry.TYPENAME_POINT.equalsIgnoreCase(gridGeometry.getGeometryType()) || !gridGeometry.isValid()) {
-////              gridGeometry = geometry;
-//              continue;
-//            }
 
-          // v2.0
+//        List<Integer> sortLength = set.stream().sorted(Comparator.comparingDouble(x -> list.get(x).length())).toList();
+
+        List<Integer> sortList = getSortList(list, set);
+        if (!sortList.isEmpty()) {
+          GeometryWithTag geometryWithTag = list.get(sortList.getLast());
+
+          // 记录首尾点与要素索引的映射
+//          Map<Coordinate, List<Integer>> endpointIndex = new HashMap<>();
+//
+//          // 遍历 sortLength 中的要素，记录首尾点
+//          for (int index : sortLength) {
+//            Geometry geom = list.get(index).geometry();
+//            Coordinate start = geom.getCoordinates()[0];
+//            Coordinate end = geom.getCoordinates()[geom.getCoordinates().length - 1];
+//
+//            endpointIndex.computeIfAbsent(start, k -> new ArrayList<>()).add(index);
+//            endpointIndex.computeIfAbsent(end, k -> new ArrayList<>()).add(index);
+//          }
+//
+//          // 保存需要保留的要素索引
+//          Set<Integer> toBeSaved = new HashSet<>();
+//          Queue<Integer> queue = new LinkedList<>();
+//          toBeSaved.add(sortLength.getLast());
+//          queue.add(sortLength.getLast());
+//
+//          // 递归处理与已保存要素完全相连的要素
+//          while (!queue.isEmpty()) {
+//            int currentIndex = queue.poll();
+//            Geometry currentGeometry = list.get(currentIndex).geometry();
+//            Coordinate currentStart = currentGeometry.getCoordinates()[0];
+//            Coordinate currentEnd = currentGeometry.getCoordinates()[currentGeometry.getCoordinates().length - 1];
+//
+//            for (Coordinate endpoint : List.of(currentStart, currentEnd)) {
+//              List<Integer> connectedFeatures = endpointIndex.getOrDefault(endpoint, Collections.emptyList());
+//              for (int connectedIndex : connectedFeatures) {
+//                if (!toBeSaved.contains(connectedIndex)) {
+//                  Geometry connectedGeometry = list.get(connectedIndex).geometry();
+//                  Coordinate connectedStart = connectedGeometry.getCoordinates()[0];
+//                  Coordinate connectedEnd = connectedGeometry.getCoordinates()[connectedGeometry.getCoordinates().length
+//                    - 1];
+//
+//                  // 判断两条线段是否完全相连
+//                  boolean isConnected = endpoint.equals(connectedStart) || endpoint.equals(connectedEnd);
+//                  if (isConnected) {
+//                    toBeSaved.add(connectedIndex);
+//                    queue.add(connectedIndex);
+//                  }
+//                }
+//              }
+//            }
+//          }
+//
+//          for (int index : sortLength) {
+//            if (toBeSaved.contains(index)) {
+//              GeometryWithTag geometryWithTag1 = list.get(index);
+//              if (!processedFeatures.contains(geometryWithTag1.geometry().hashCode())) {
+//                processedFeatures.add(geometryWithTag1.geometry().hashCode());
+//                result.add(geometryWithTag1);
+//              }
+//            }
+//          }
+
           if (processedFeatures.contains(geometryWithTag.geometry.hashCode())) {
             continue;
           }
           processedFeatures.add(geometryWithTag.geometry.hashCode());
-//          Geometry gridGeometry = geometryWithTag.geometry();
-//
-//          GeometryWithTag resultGeom = new GeometryWithTag(geometryWithTag.layer, geometryWithTag.id,
-//            geometryWithTag.tags, geometryWithTag.group, gridGeometry, geometryWithTag.size, geometryWithTag.area,
-//            geometryWithTag.hash, geometryWithTag.length);
+
           result.add(geometryWithTag);
         }
       }
     }
     return result;
+  }
+
+  public List<Integer> getSortList(List<GeometryWithTag> list, Set<Integer> set) {
+    return set.stream()
+      .filter(index -> {
+        Map<String, Object> tags = list.get(index).tags();
+        Integer minZoom = TagUtils.getFieldValueMinZoom(tags, config.zoomLevelsMap());
+        return minZoom == null || minZoom <= tileCoord.z();
+      }).sorted((index1, index2) -> {
+        Map<String, Object> tags1 = list.get(index1).tags();
+        Map<String, Object> tags2 = list.get(index2).tags();
+
+        int rank1 = TagUtils.calculateRankOrder(tags1, config.sortField(), config.isAsc(), config.priorityLevelsMap(),
+          null);
+        int rank2 = TagUtils.calculateRankOrder(tags2, config.sortField(), config.isAsc(), config.priorityLevelsMap(),
+          null);
+
+        // 如果排名不同，按排名排序
+        if (rank1 != rank2) {
+          return Integer.compare(rank1, rank2);
+        }
+
+        // 如果排名相同，按长度排序
+        double length1 = list.get(index1).length();
+        double length2 = list.get(index2).length();
+        return Double.compare(length2, length1);
+      }).toList();
   }
 
   private List<GeometryWithTag> mergePolygon(List<GeometryWithTag> list, double totalSize,
@@ -827,140 +909,4 @@ public class TileMergeRunnable implements Runnable {
         feature.geometry().commands().length));
   }
 
-  private static void mergeMiddleFeatureToBigger(List<GeometryWrapper> bigger, List<GeometryWrapper> middle,
-    double minDistAndBuffer) {
-    // 构建一个保留要素的索引
-    STRtree envelopeIndex = new STRtree();
-    for (int i = 0; i < bigger.size(); i++) {
-      Geometry geometry = bigger.get(i).geometry();
-      Envelope env = geometry.getEnvelopeInternal().copy();
-      env.expandBy(0);
-      envelopeIndex.insert(env, i);
-    }
-    // 2、从待合并要素中遍历像素，目标是跟周围要素进行一个融合，不需要保存属性
-    for (GeometryWrapper wrapper : middle) {
-      Geometry geometry = wrapper.geometry();
-      // 存储与待删除要素相交的要素
-      Set<Integer> set = new HashSet<>();
-      envelopeIndex.query(geometry.getEnvelopeInternal(), object -> {
-        if (object instanceof Integer j) {
-          Geometry b = bigger.get(j).geometry();
-          if (geometry.isWithinDistance(b, minDistAndBuffer)) {
-            set.add(j);
-          }
-        }
-      });
-      // 将需要删除的要素执行像素化分配给待合并的要素
-      List<Integer> list = new ArrayList<>(set);
-      list.sort(Comparator.comparingDouble(o -> bigger.get(o).area));
-      if (!list.isEmpty()) {
-        Integer target = list.getFirst();
-        GeometryWrapper targetWrapper = bigger.get(target);
-        List<Geometry> mergeList = new ArrayList<>();
-        Geometry targetGeometry = targetWrapper.geometry();
-        mergeList.add(targetGeometry);
-        mergeList.add(geometry.buffer(minDistAndBuffer));
-        // TODO: 合并并不一定会成功，需要优化合并算法
-        Geometry merged = GeoUtils.createGeometryCollection(mergeList);
-        try {
-          merged = union(merged);
-        } catch (TopologyException e) {
-          // 缓冲结果有时无效，这使得 union 抛出异常，因此修复它并重试（见 #700）
-          merged = GeometryFixer.fix(merged);
-          merged = union(merged);
-        }
-        // TODO: 对合并完的要素再做一次简化算法
-        targetWrapper.feature().copyWithNewGeometry(merged);
-      } else {
-        // TODO: 执行要素合并
-      }
-    }
-  }
-
-
-  private List<Geometry> pixelLine(Geometry line, Map<String, GeometryWithTag> gridToGeomtryMap,
-    GeometryWithTag originalGeometryWithTag) {
-    if (line instanceof MultiLineString multiLine) {
-      for (int i = 0; i < multiLine.getNumGeometries(); i++) {
-        pixelLine(multiLine.getGeometryN(i), gridToGeomtryMap, originalGeometryWithTag);
-      }
-      return Collections.emptyList();
-    }
-
-//    GeometryClipper clipper = new GeometryClipper(tileEnvelope);
-
-    Coordinate[] coords = line.getCoordinates();
-    if (coords.length < 2) {
-      return Collections.emptyList();
-    }
-
-    Geometry[][] vectorGrid = gridEntity.getVectorGrid();
-    for (int i = 0; i < coords.length - 1; i++) {
-      Coordinate start = coords[i];
-      Coordinate end = coords[i + 1];
-
-      // 计算起点和终点的网格索引
-      int gridWidth = gridEntity.getGridWidth();
-      int startX = ((int) Math.floor(start.x + GridEntity.BUFFER)) / gridWidth * gridWidth;
-      int startY = ((int) Math.floor(start.y + GridEntity.BUFFER)) / gridWidth * gridWidth;
-      int endX = ((int) Math.floor(end.x + GridEntity.BUFFER)) / gridWidth * gridWidth;
-      int endY = (int) Math.floor((end.y + GridEntity.BUFFER)) / gridWidth * gridWidth;
-
-      int max = 2 * GridEntity.BUFFER;
-      startX = Math.max(0, Math.min(startX, max));
-      startY = Math.max(0, Math.min(startY, max));
-      endX = Math.max(0, Math.min(endX, max));
-      endY = Math.max(0, Math.min(endY, max));
-
-      // 扫描起点到终点的所有网格
-      for (int x = Math.min(startX, endX); x <= Math.max(startX, endX); x += gridWidth) {
-        for (int y = Math.min(startY, endY); y <= Math.max(startY, endY); y += gridWidth) {
-          Geometry geometry = vectorGrid[x][y];
-          if (!geometry.intersects(originalGeometryWithTag.geometry)) {
-            continue;
-          }
-
-          String gridKey = x + "_" + y;
-          if (gridToGeomtryMap.containsKey(gridKey)) {
-            GeometryWithTag existGeometry = gridToGeomtryMap.get(gridKey);
-            // TODO  暂时使用要素长度计算 后续使用真实长度
-            if (existGeometry.length() >= originalGeometryWithTag.length()) {
-              continue;
-            }
-          }
-
-          Geometry gridSquare = createGridSquare(x, y, gridWidth);
-          gridToGeomtryMap.put(gridKey, new GeometryWithTag(
-            originalGeometryWithTag.layer(),
-            originalGeometryWithTag.id(),
-            originalGeometryWithTag.tags(),
-            originalGeometryWithTag.group(),
-            gridSquare,
-            originalGeometryWithTag.size(),
-            originalGeometryWithTag.area(),
-            originalGeometryWithTag.hash(),
-            originalGeometryWithTag.length()
-          ));
-        }
-      }
-    }
-
-    return Collections.emptyList();
-  }
-
-  private Geometry createGridSquare(int gridX, int gridY, int gridWidth) {
-    double minX = gridX;
-    double minY = gridY;
-    double maxX = minX + gridWidth;
-    double maxY = minY + gridWidth;
-
-    Coordinate[] squareCoords = new Coordinate[]{
-      new Coordinate(minX, minY),
-      new Coordinate(maxX, minY),
-      new Coordinate(maxX, maxY),
-      new Coordinate(minX, maxY),
-      new Coordinate(minX, minY)
-    };
-    return geometryFactory.createPolygon(squareCoords);
-  }
 }

@@ -2,6 +2,7 @@ package com.onthegomap.planetiler.util;
 
 import static com.fasterxml.jackson.annotation.JsonInclude.Include.NON_ABSENT;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
@@ -41,6 +42,14 @@ public class JsonUitls {
       return PRETTY_WRITER.writeValueAsString(o);
     } catch (Exception e) {
       throw new RuntimeException("Error converting TileArchiveMetadataJson to pretty JSON string", e);
+    }
+  }
+
+  public static <T> T fromJson(String jsonString, TypeReference<T> typeReference) {
+    try {
+      return OBJECT_MAPPER.readValue(jsonString, typeReference);
+    } catch (Exception e) {
+      throw new RuntimeException("JSON 解析失败: " + e.getMessage(), e);
     }
   }
 }

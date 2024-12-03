@@ -1,9 +1,11 @@
 package com.onthegomap.planetiler.config;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.stats.Stats;
+import com.onthegomap.planetiler.util.JsonUitls;
 import com.onthegomap.planetiler.util.ZoomFunction;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -589,7 +591,8 @@ public class Arguments {
       ));
   }
 
-  public <T> ZoomFunction<T> getZoomFunction(String key, Function<String, Integer> keyParser, Function<String, ? extends T> valueParser,
+  public <T> ZoomFunction<T> getZoomFunction(String key, Function<String, Integer> keyParser,
+    Function<String, ? extends T> valueParser,
     String description, String defaultValue) {
     Map<Integer, ? extends T> map = getMap(key, keyParser, valueParser, description, defaultValue);
     if (map == null) {
@@ -597,5 +600,16 @@ public class Arguments {
     }
 
     return ZoomFunction.fromMaxZoomThresholds(map);
+  }
+
+  public <T> T getObjectFromJson(String key, String description, TypeReference<T> typeReference) {
+    String value = getArg(key);
+    if (value == null) {
+      return null;
+    }
+
+    T t = JsonUitls.fromJson(value, typeReference);
+    logArgValue(key, description, t);
+    return t;
   }
 }
