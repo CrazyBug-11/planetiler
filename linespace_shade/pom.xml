@@ -6,7 +6,7 @@
   <parent>
     <groupId>com.onthegomap.planetiler</groupId>
     <artifactId>planetiler-parent</artifactId>
-    <version>0.8.3</version>
+    <version>${revision}</version>
   </parent>
 
   <artifactId>linespace_shade</artifactId>
@@ -16,7 +16,7 @@
     <dependency>
       <groupId>com.onthegomap.planetiler</groupId>
       <artifactId>planetiler-core</artifactId>
-      <version>0.8.3</version>
+      <version>${revision}</version>
       <exclusions>
         <exclusion>
           <groupId>com.fasterxml.jackson.dataformat</groupId>
