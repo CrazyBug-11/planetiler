@@ -4,13 +4,13 @@ import com.carrotsearch.hppc.IntArrayList;
 import com.carrotsearch.hppc.IntObjectMap;
 import com.carrotsearch.hppc.IntStack;
 import com.onthegomap.planetiler.collection.Hppc;
-import com.onthegomap.planetiler.geo.DouglasPeuckerSimplifier;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.geo.GeometryType;
 import com.onthegomap.planetiler.geo.MutableCoordinateSequence;
 import com.onthegomap.planetiler.stats.DefaultStats;
 import com.onthegomap.planetiler.stats.Stats;
+import com.onthegomap.planetiler.util.LoopLineMerger;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collection;
@@ -43,14 +43,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 一个用于在 {@link Profile#postProcessLayerFeatures(String, int, List)} 中合并具有相同属性的特征的工具集合，
- * 在将一个图块写入输出存档之前调用。
+ * A collection of utilities for merging features with the same attributes in a rendered tile from
+ * {@link Profile#postProcessLayerFeatures(String, int, List)} immediately before a tile is written to the output
+ * archive.
  * <p>
- * 与基于 PostGIS 的解决方案不同，后者在将所有特征加载到数据库后可以全面查看所有特征，
- * 而 planetiler 引擎在处理源特征时一次只能看到一个输入特征，
- * 然后在发出之前只在图块内可见多个特征。这对于大多数实际应用场景来说已经足够，
- * 但是如果需要查看多个特征（<em>不</em> 在同一个图块中），
- * {@link Profile} 实现必须手动存储输入特征。
+ * Unlike postgis-based solutions that have a full view of all features after they are loaded into the database, the
+ * planetiler engine only sees a single input feature at a time while processing source features, then only has
+ * visibility into multiple features when they are grouped into a tile immediately before emitting. This ends up being
+ * sufficient for most real-world use-cases but to do anything more that requires a view of multiple features
+ * <em>not</em> within the same tile, {@link Profile} implementations must store input features manually.
  */
 public class FeatureMerge {
 
@@ -64,22 +65,24 @@ public class FeatureMerge {
     bufferOps.setJoinStyle(BufferParameters.JOIN_MITRE);
   }
 
-  /** 不实例化 */
+  /** Don't instantiate */
   private FeatureMerge() {}
 
   /**
-   * 将具有相同属性的线串合并为多线串，其中端点相接的段由 {@link LineMerger} 合并，移除小于 {@code minLength} 的线串。
+   * Combines linestrings with the same set of attributes into a multilinestring where segments with touching endpoints
+   * are merged by {@link LineMerger}, removing any linestrings under {@code minLength}.
    * <p>
-   * 忽略任何非线串并将其原样传递到输出。
+   * Ignores any non-linestrings and passes them through to the output unaltered.
    * <p>
-   * 将合并后的多线串按输入列表中第一个元素的索引排序。
+   * Orders grouped output multilinestring by the index of the first element in that group from the input list.
    *
-   * @param features   图层中的所有特征
-   * @param minLength  要发出的特征的最小像素长度，或 0 以发出所有合并的线串
-   * @param tolerance  合并后，使用此像素容差简化线串，或 -1 以跳过简化步骤
-   * @param buffer     包含详细信息的可见图块区域外的像素数，或 -1 以跳过剪裁步骤
-   * @param resimplify 如果线串即使没有与另一个合并也应该简化，则为真
-   * @return 一个新列表，其中包含所有未更改的特征（按原始顺序），然后是每个合并组（按输入列表中第一个元素的索引排序）。
+   * @param features   all features in a layer
+   * @param minLength  minimum tile pixel length of features to emit, or 0 to emit all merged linestrings
+   * @param tolerance  after merging, simplify linestrings using this pixel tolerance, or -1 to skip simplification step
+   * @param buffer     number of pixels outside the visible tile area to include detail for, or -1 to skip clipping step
+   * @param resimplify True if linestrings should be simplified even if they don't get merged with another
+   * @return a new list containing all unaltered features in their original order, then each of the merged groups
+   *         ordered by the index of the first element in that group from the input list.
    */
   public static List<VectorTile.Feature> mergeLineStrings(List<VectorTile.Feature> features,
     double minLength, double tolerance, double buffer, boolean resimplify) {
@@ -87,23 +90,24 @@ public class FeatureMerge {
   }
 
   /**
-   * 合并具有相同属性的线串，与 {@link #mergeLineStrings(List, double, double, double, boolean)} 类似，
-   * 但默认设置 {@code resimplify=false}。
+   * Merges linestrings with the same attributes as {@link #mergeLineStrings(List, double, double, double, boolean)}
+   * except sets {@code resimplify=false} by default.
    */
   public static List<VectorTile.Feature> mergeLineStrings(List<VectorTile.Feature> features,
     double minLength, double tolerance, double buffer) {
     return mergeLineStrings(features, minLength, tolerance, buffer, false);
   }
 
-  /** 将具有相同属性的点合并为多点。 */
+  /** Merges points with the same attributes into multipoints. */
   public static List<VectorTile.Feature> mergeMultiPoint(List<VectorTile.Feature> features) {
     return mergeGeometries(features, Collections.emptyList(), GeometryType.POINT);
   }
 
   /**
-   * 将具有相同属性的多边形合并为多边形。
+   * Merges polygons with the same attributes into multipolygons.
    * <p>
-   * 注意：这不会尝试合并重叠的几何图形，参见 {@link #mergeOverlappingPolygons(List, double)} 或 {@link #mergeNearbyPolygons(List, double, double, double, double)}。
+   * NOTE: This does not attempt to combine overlapping geometries, see {@link #mergeOverlappingPolygons(List, double)}
+   * or {@link #mergeNearbyPolygons(List, double, double, double, double)} for that.
    */
   public static List<VectorTile.Feature> mergeMultiPolygon(List<VectorTile.Feature> features) {
     return mergeGeometries(features, Collections.emptyList(), GeometryType.POLYGON);
@@ -149,8 +153,8 @@ public class FeatureMerge {
   }
 
   /**
-   * 合并具有相同属性的线串，与 {@link #mergeLineStrings(List, Function, double, double, boolean)} 类似，
-   * 但默认设置 {@code resimplify=false}。
+   * Merges linestrings with the same attributes as {@link #mergeLineStrings(List, Function, double, double, boolean)}
+   * except sets {@code resimplify=false} by default.
    */
   public static List<VectorTile.Feature> mergeLineStrings(List<VectorTile.Feature> features,
     Function<Map<String, Object>, Double> lengthLimitCalculator, double tolerance, double buffer) {
@@ -158,8 +162,8 @@ public class FeatureMerge {
   }
 
   /**
-   * 合并具有相同属性的线串，与 {@link #mergeLineStrings(List, double, double, double, boolean)} 类似，
-   * 但使用 {@code lengthLimitCalculator} 动态计算每组的长度限制。
+   * Merges linestrings with the same attributes as {@link #mergeLineStrings(List, double, double, double, boolean)}
+   * except with a dynamic length limit computed by {@code lengthLimitCalculator} for the attributes of each group.
    */
   public static List<VectorTile.Feature> mergeLineStrings(List<VectorTile.Feature> features,
     Function<Map<String, Object>, Double> lengthLimitCalculator, double tolerance, double buffer, boolean resimplify) {
@@ -169,15 +173,20 @@ public class FeatureMerge {
       VectorTile.Feature feature1 = groupedFeatures.getFirst();
       double lengthLimit = lengthLimitCalculator.apply(feature1.tags());
 
-      // 作为一种快捷方式，可以跳过线合并，只有当：
-      // - 组中只有 1 个元素
-      // - 不需要剪裁
-      // - 它不能因太短而被过滤掉
-      // - 它不需要简化
+      // as a shortcut, can skip line merging only if:
+      // - only 1 element in the group
+      // - it doesn't need to be clipped
+      // - and it can't possibly be filtered out for being too short
+      // - and it does not need to be simplified
       if (groupedFeatures.size() == 1 && buffer == 0d && lengthLimit == 0 && (!resimplify || tolerance == 0)) {
         result.add(feature1);
       } else {
-        LineMerger merger = new LineMerger();
+        LoopLineMerger merger = new LoopLineMerger()
+          .setTolerance(tolerance)
+          .setMergeStrokes(true)
+          .setMinLength(lengthLimit)
+          .setLoopMinLength(lengthLimit)
+          .setStubMinLength(0.5);
         for (VectorTile.Feature feature : groupedFeatures) {
           try {
             merger.add(feature.geometry().decode());
@@ -186,24 +195,14 @@ public class FeatureMerge {
           }
         }
         List<LineString> outputSegments = new ArrayList<>();
-        for (Object merged : merger.getMergedLineStrings()) {
-          if (merged instanceof LineString line && line.getLength() >= lengthLimit) {
-            // 重新简化，因为合并段的某些端点可能不必要
-            if (line.getNumPoints() > 2 && tolerance >= 0) {
-              Geometry simplified = DouglasPeuckerSimplifier.simplify(line, tolerance);
-              if (simplified instanceof LineString simpleLineString) {
-                line = simpleLineString;
-              } else {
-                LOGGER.warn("line string merge simplify emitted {}", simplified.getGeometryType());
-              }
-            }
-            if (buffer >= 0) {
-              removeDetailOutsideTile(line, buffer, outputSegments);
-            } else {
-              outputSegments.add(line);
-            }
+        for (var line : merger.getMergedLineStrings()) {
+          if (buffer >= 0) {
+            removeDetailOutsideTile(line, buffer, outputSegments);
+          } else {
+            outputSegments.add(line);
           }
         }
+
         if (!outputSegments.isEmpty()) {
           outputSegments = sortByHilbertIndex(outputSegments);
           Geometry newGeometry = GeoUtils.combineLineStrings(outputSegments);
@@ -215,7 +214,8 @@ public class FeatureMerge {
   }
 
   /**
-   * 从 {@code input} 中移除起点和终点都在图块边界（加上 {@code buffer}）外的段，并将结果段放入 {@code output} 中。
+   * Removes any segments from {@code input} where both the start and end are outside the tile boundary (plus {@code
+   * buffer}) and puts the resulting segments into {@code output}.
    */
   private static void removeDetailOutsideTile(LineString input, double buffer, List<LineString> output) {
     MutableCoordinateSequence current = new MutableCoordinateSequence();
@@ -245,7 +245,7 @@ public class FeatureMerge {
       y = nextY;
     }
 
-    // 最后一个点
+    // last point
     double lastX = seq.getX(seq.size() - 1), lastY = seq.getY(seq.size() - 1);
     env.init(x, lastX, y, lastY);
     if (env.intersects(outer) || wasIn) {
@@ -258,16 +258,18 @@ public class FeatureMerge {
   }
 
   /**
-   * 将具有相同属性的多边形合并为覆盖相同区域的多边形，重叠/相接的多边形合并为更少的多边形。
+   * Combines polygons with the same set of attributes into a multipolygon where overlapping/touching polygons are
+   * combined into fewer polygons covering the same area.
    * <p>
-   * 忽略任何非多边形并将其原样传递到输出。
+   * Ignores any non-polygons and passes them through to the output unaltered.
    * <p>
-   * 将合并后的多边形按输入列表中第一个元素的索引排序。
+   * Orders grouped output multipolygon by the index of the first element in that group from the input list.
    *
-   * @param features 图层中的所有特征
-   * @param minArea  要发出的多边形的最小像素面积
-   * @return 一个新列表，其中包含所有未更改的特征（按原始顺序），然后是每个合并组（按输入列表中第一个元素的索引排序）。
-   * @throws GeometryException 如果编码合并的几何图形时发生错误
+   * @param features all features in a layer
+   * @param minArea  minimum area in square tile pixels of polygons to emit
+   * @return a new list containing all unaltered features in their original order, then each of the merged groups
+   *         ordered by the index of the first element in that group from the input list.
+   * @throws GeometryException if an error occurs encoding the combined geometry
    */
   public static List<VectorTile.Feature> mergeOverlappingPolygons(List<VectorTile.Feature> features, double minArea)
     throws GeometryException {
@@ -281,20 +283,23 @@ public class FeatureMerge {
   }
 
   /**
-   * 合并在 {@code minDist} 范围内的具有相同属性的多边形，通过扩展然后收缩合并的几何图形 {@code buffer} 来合并几乎相接的多边形。
+   * Combines polygons with the same set of attributes within {@code minDist} from each other, expanding then
+   * contracting the merged geometry by {@code buffer} to combine polygons that are almost touching.
    * <p>
-   * 忽略任何非多边形并将其原样传递到输出。
+   * Ignores any non-polygons and passes them through to the output unaltered.
    * <p>
-   * 将合并后的多边形按输入列表中第一个元素的索引排序。
+   * Orders grouped output multipolygon by the index of the first element in that group from the input list.
    *
-   * @param features    图层中的所有特征
-   * @param minArea     要发出的多边形的最小像素面积
-   * @param minHoleArea 多边形内环的最小像素面积
-   * @param minDist     多边形之间的最小距离阈值，以像素为单位，合并为一组
-   * @param buffer      扩展然后收缩多边形以合并几乎相接的多边形的数量（以像素为单位）
-   * @param stats       用于统计数据错误
-   * @return 一个新列表，其中包含所有未更改的特征（按原始顺序），然后是每个合并组（按输入列表中第一个元素的索引排序）。
-   * @throws GeometryException 如果编码合并的几何图形时发生错误
+   * @param features    all features in a layer
+   * @param minArea     minimum area in square tile pixels of polygons to emit
+   * @param minHoleArea the minimum area in square tile pixels of inner rings of polygons to emit
+   * @param minDist     the minimum threshold in tile pixels between polygons to combine into a group
+   * @param buffer      the amount (in tile pixels) to expand then contract polygons by in order to combine
+   *                    almost-touching polygons
+   * @param stats       for counting data errors
+   * @return a new list containing all unaltered features in their original order, then each of the merged groups
+   *         ordered by the index of the first element in that group from the input list.
+   * @throws GeometryException if an error occurs encoding the combined geometry
    */
   public static List<VectorTile.Feature> mergeNearbyPolygons(List<VectorTile.Feature> features, double minArea,
     double minHoleArea, double minDist, double buffer, List<String> mergeFields, Stats stats) throws GeometryException {
@@ -317,11 +322,14 @@ public class FeatureMerge {
         Geometry merged;
         if (polygonGroup.size() > 1) {
           if (buffer > 0) {
-            // 有两种合并多边形的方法：
+            // there are 2 ways to merge polygons:
             // 1) bufferUnbuffer: merged.buffer(amount).buffer(-amount)
-            // 2) bufferUnionUnbuffer: 对每个多边形执行 polygon.buffer(amount)，然后合并 merged.union().buffer(-amount)
-            // 方法 #1 在大多数情况下较快，但当缓冲多边形之间存在大重叠时（即大多数小于缓冲量）会变得非常慢并占用大量内存，因此我们使用 #2 避免在非常密集的图块上长时间运行。
-            // TODO 使用某种启发式方法，根据组中小多边形的数量选择 bufferUnbuffer 或 bufferUnionUnbuffer？
+            // 2) bufferUnionUnbuffer: polygon.buffer(amount) on each polygon then merged.union().buffer(-amount)
+            // #1 is faster on average, but can become very slow and use a lot of memory when there is a large overlap
+            // between buffered polygons (i.e. most of them are smaller than the buffer amount) so we use #2 to avoid
+            // spinning for a very long time on very dense tiles.
+            // TODO use some heuristic to choose bufferUnbuffer vs. bufferUnionUnbuffer based on the number small
+            //      polygons in the group?
             merged = bufferUnionUnbuffer(buffer, polygonGroup, stats);
           } else {
             merged = buffer(buffer, GeoUtils.createGeometryCollection(polygonGroup));
@@ -522,12 +530,12 @@ public class FeatureMerge {
   }
 
   /**
-   * 返回具有相同属性的矢量图块特征组。
+   * Returns each group of vector tile features that share the exact same attributes.
    *
-   * @param features     输入特征集
-   * @param others       添加不匹配 {@code geometryType} 的任何特征的列表
-   * @param geometryType 返回结果中的几何类型
-   * @return 所有类型为 {@code geometryType} 的特征，按属性分组
+   * @param features     the set of input features
+   * @param others       list to add any feature that does not match {@code geometryType}
+   * @param geometryType the type of geometries to return in the result
+   * @return all the elements from {@code features} of type {@code geometryType} grouped by attributes
    */
   public static Collection<List<VectorTile.Feature>> groupByAttrs(
     List<VectorTile.Feature> features,
@@ -551,19 +559,22 @@ public class FeatureMerge {
   }
 
   /**
-   * 通过扩展每个单独的多边形 {@code buffer}，将它们合并，然后收缩结果。
+   * Merges nearby polygons by expanding each individual polygon by {@code buffer}, unioning them, and contracting the
+   * result.
    */
   static Geometry bufferUnionUnbuffer(double buffer, List<Geometry> polygonGroup, Stats stats) {
     /*
-     * 另一个看起来更简单更快的替代方案可能是：
+     * A simpler alternative that might initially appear faster would be:
      *
      * Geometry merged = GeoUtils.createGeometryCollection(polygonGroup);
      * merged = buffer(buffer, merged);
      * merged = unbuffer(buffer, merged);
      *
-     * 但由于 buffer() 比 union() 快，只有当重叠量较小时，这种技术在合并许多密集的附近多边形时变得非常慢。
+     * But since buffer() is faster than union() only when the amount of overlap is small,
+     * this technique becomes very slow for merging many small nearby polygons.
      *
-     * 以下方法在大多数情况下更慢，但在平均情况下更快，因为它不会在密集的附近多边形上卡住：
+     * The following approach is slower most of the time, but faster on average because it does
+     * not choke on dense nearby polygons:
      */
     List<Geometry> buffered = new ArrayList<>(polygonGroup.size());
     for (Geometry geometry : polygonGroup) {
@@ -573,7 +584,8 @@ public class FeatureMerge {
     try {
       merged = union(merged);
     } catch (TopologyException e) {
-      // 缓冲结果有时无效，这使得 union 抛出异常，因此修复它并重试（见 #700）
+      // buffer result is sometimes invalid, which makes union throw so fix
+      // it and try again (see #700)
       stats.dataError("buffer_union_unbuffer_union_failed");
       merged = GeometryFixer.fix(merged);
       merged = union(merged);
@@ -582,7 +594,7 @@ public class FeatureMerge {
     return merged;
   }
 
-  // 这些小包装使得使用 jvisualvm 进行性能分析更容易...
+  // these small wrappers make performance profiling with jvisualvm easier...
   private static Geometry union(Geometry merged) {
     return merged.union();
   }
@@ -596,7 +608,8 @@ public class FeatureMerge {
   }
 
   /**
-   * 将 {@code geom} 中大于 {@code minArea} 的所有多边形放入 {@code result}，去除小于 {@code minHoleArea} 的孔。
+   * Puts all polygons within {@code geom} over {@code minArea} into {@code result}, removing holes under {@code
+   * minHoleArea}.
    */
   private static void extractPolygons(Geometry geom, List<Polygon> result, double minArea, double minHoleArea) {
     if (geom instanceof Polygon poly) {
@@ -623,7 +636,7 @@ public class FeatureMerge {
     }
   }
 
-  /** 返回一个从索引到每个在 {@code minDist} 范围内的几何图形的索引的地图。 */
+  /** Returns a map from index in {@code geometries} to index of every other geometry within {@code minDist}. */
   private static IntObjectMap<IntArrayList> extractAdjacencyList(List<Geometry> geometries, double minDist) {
     STRtree envelopeIndex = new STRtree();
     for (int i = 0; i < geometries.size(); i++) {
@@ -675,7 +688,8 @@ public class FeatureMerge {
 
   private static void depthFirstSearch(int startNode, IntArrayList group, IntObjectMap<IntArrayList> adjacencyList,
     BitSet visited) {
-    // 进行迭代（而不是递归）深度优先搜索，因为在处理非常密集的区域（如雅加达）的 z13 建筑物时，递归调用可能会产生 stackoverflow 错误
+    // do iterate (not recursive) depth-first search since when merging z13 building in very dense areas like Jakarta
+    // recursive calls can generate a stackoverflow error
     IntStack stack = new IntStack();
     stack.add(startNode);
     while (!stack.isEmpty()) {
@@ -687,7 +701,8 @@ public class FeatureMerge {
           if (!visited.get(index)) {
             visited.set(index, true);
             group.add(index);
-            // 从技术上讲，深度优先搜索会按相反顺序推入堆栈，但由于排序无关紧要，因此不需要这样做
+            // technically, depth-first search would push onto the stack in reverse order but don't bother since
+            // ordering doesn't matter
             stack.push(index);
           }
         }
@@ -696,7 +711,8 @@ public class FeatureMerge {
   }
 
   /**
-   * 返回一个新特征列表，其中删除了距图块边界超过 {@code buffer} 像素的点，假设图块为 256x256 像素。
+   * Returns a new list of features with points that are more than {@code buffer} pixels outside the tile boundary
+   * removed, assuming a 256x256px tile.
    */
   public static List<VectorTile.Feature> removePointsOutsideBuffer(List<VectorTile.Feature> features, double buffer) {
     if (!Double.isFinite(buffer)) {

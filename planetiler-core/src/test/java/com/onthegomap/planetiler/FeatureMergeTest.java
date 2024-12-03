@@ -165,6 +165,21 @@ class FeatureMergeTest {
         true
       )
     );
+    // but doesn't resimplify if the tolerance is negative even when resimplify=true
+    assertEquals(
+      List.of(
+        feature(1, newLineString(10, 10, 20, 20, 30, 30), Map.of("a", 1))
+      ),
+      FeatureMerge.mergeLineStrings(
+        List.of(
+          feature(1, newLineString(10, 10, 20, 20, 30, 30), Map.of("a", 1))
+        ),
+        0,
+        -1,
+        0,
+        true
+      )
+    );
   }
 
   @Test
@@ -623,6 +638,7 @@ class FeatureMergeTest {
     );
   }
 
+  @Slow
   @ParameterizedTest
   @CsvSource({
     "bostonbuildings.mbtiles, 2477, 3028, 13, 1141",

@@ -205,7 +205,7 @@ public record PlanetilerConfig(
     int renderMaxzoom =
       arguments.getInteger("render_maxzoom", "maximum rendering zoom level up to " + MAX_MAXZOOM,
         Math.max(maxzoom, DEFAULT_MAXZOOM));
-    Path tmpDir = arguments.file("tmpdir", "temp directory", Path.of("data", "tmp"));
+    Path tmpDir = arguments.file("tmpdir|tmp", "temp directory", Path.of("data", "tmp"));
 
     return new PlanetilerConfig(
       // todo linespace
@@ -307,9 +307,8 @@ public record PlanetilerConfig(
       arguments.file("tile_weights", "tsv.gz file with columns z,x,y,loads to generate weighted average tile size stat",
         tmpDir.resolveSibling("tile_weights.tsv.gz")),
       arguments.getDouble("max_point_buffer",
-        "Max tile pixels to include points outside tile bounds. Set to a lower value to reduce tile size for " +
-          "clients that handle label collisions across tiles (most web and native clients). NOTE: Do not reduce if you need to support "
-          +
+        "Additional global limit for the max tile pixels to include points outside tile bounds of all layers. Set to a lower value to reduce tile size for " +
+          "clients that handle label collisions across tiles (most web and native clients). NOTE: Do not reduce if you need to support " +
           "raster tile rendering",
         Double.POSITIVE_INFINITY),
       arguments.getBoolean("log_jts_exceptions", "Emit verbose details to debug JTS geometry errors", false),

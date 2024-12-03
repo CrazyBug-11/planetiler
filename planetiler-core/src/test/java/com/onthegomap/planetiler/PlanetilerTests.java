@@ -21,6 +21,7 @@ import com.onthegomap.planetiler.files.ReadableFilesArchive;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.geo.GeometryType;
+import com.onthegomap.planetiler.geo.SimplifyMethod;
 import com.onthegomap.planetiler.geo.TileCoord;
 import com.onthegomap.planetiler.geo.TileOrder;
 import com.onthegomap.planetiler.layers.Poi;
@@ -83,6 +84,7 @@ import org.slf4j.LoggerFactory;
 /**
  * In-memory tests with fake data and profiles to ensure all features work end-to-end.
  */
+@Slow
 class PlanetilerTests {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(PlanetilerTests.class);
@@ -440,26 +442,37 @@ class PlanetilerTests {
   }
 
   @ParameterizedTest
-  @ValueSource(booleans = {false, true})
-  void testLineString(boolean anyGeom) throws Exception {
+  @CsvSource({
+    "false,RETAIN_IMPORTANT_POINTS",
+    "false,RETAIN_EFFECTIVE_AREAS",
+    "false,RETAIN_WEIGHTED_EFFECTIVE_AREAS",
+    "true,RETAIN_IMPORTANT_POINTS",
+  })
+  void testLineString(boolean anyGeom, SimplifyMethod simplifyStrategy) throws Exception {
     double x1 = 0.5 + Z14_WIDTH / 2;
     double y1 = 0.5 + Z14_WIDTH / 2;
     double x2 = x1 + Z14_WIDTH;
     double y2 = y1 + Z14_WIDTH;
+    double ymid = (y1 + y2) / 2;
+    double xmid = (x1 + x2) / 2;
     double lat1 = GeoUtils.getWorldLat(y1);
     double lng1 = GeoUtils.getWorldLon(x1);
+    double latMid = GeoUtils.getWorldLat(ymid);
+    double lngMid = GeoUtils.getWorldLon(xmid);
     double lat2 = GeoUtils.getWorldLat(y2);
     double lng2 = GeoUtils.getWorldLon(x2);
 
     var results = runWithReaderFeatures(
       Map.of("threads", "1"),
       List.of(
-        newReaderFeature(newLineString(lng1, lat1, lng2, lat2), Map.of(
+        newReaderFeature(newLineString(lng1, lat1, lngMid, latMid, lng2, lat2), Map.of(
           "attr", "value"
         ))
       ),
       (in, features) -> (anyGeom ? features.anyGeometry("layer") : features.line("layer"))
         .setZoomRange(13, 14)
+        .setPixelTolerance(1)
+        .setSimplifyMethod(simplifyStrategy)
         .setBufferPixels(4)
     );
 
@@ -781,7 +794,7 @@ class PlanetilerTests {
         ), Map.of())
       )),
       newTileEntry(Z14_TILES / 2 + 2, Z14_TILES / 2 + 1, 14, List.of(
-        feature(newPolygon(tileFill(5), List.of()), Map.of())
+        feature(newPolygon(tileFill(4), List.of()), Map.of())
       )),
       newTileEntry(Z14_TILES / 2 + 3, Z14_TILES / 2 + 1, 14, List.of(
         feature(tileLeft(4), Map.of())
@@ -825,7 +838,7 @@ class PlanetilerTests {
     );
 
     assertEquals(List.of(
-      feature(newPolygon(tileFill(5)), Map.of())
+      feature(newPolygon(tileFill(4)), Map.of())
     ), results.tiles.get(TileCoord.ofXYZ(Z15_TILES / 2, Z15_TILES / 2, 15)));
   }
 
@@ -843,7 +856,7 @@ class PlanetilerTests {
 
     assertEquals(5461, results.tiles.size());
     // spot-check one filled tile
-    assertEquals(List.of(rectangle(-5, 256 + 5).norm()), results.tiles.get(TileCoord.ofXYZ(
+    assertEquals(List.of(rectangle(-4, 256 + 4).norm()), results.tiles.get(TileCoord.ofXYZ(
       Z4_TILES / 2, Z4_TILES / 2, 4
     )).stream().map(d -> d.geometry().geom().norm()).toList());
   }
@@ -2098,10 +2111,13 @@ class PlanetilerTests {
     "--tile-compression=none",
     "--tile-compression=gzip",
     "--output-layerstats",
-    "--max-point-buffer=1"
+    "--max-point-buffer=1",
+    "--osm-test-path=monaco-latest.lz4.osm.pbf",
   })
   void testPlanetilerRunner(String args) throws Exception {
-    Path originalOsm = TestUtils.pathToResource("monaco-latest.osm.pbf");
+    var argParsed = Arguments.fromArgs(args.split(" "));
+    Path originalOsm =
+      TestUtils.pathToResource(argParsed.getString("osm-test-path", "osm-test-path", "monaco-latest.osm.pbf"));
     Path tempOsm = tempDir.resolve("monaco-temp.osm.pbf");
     final TileCompression tileCompression = extractTileCompression(args);
 
@@ -2808,7 +2824,7 @@ class PlanetilerTests {
       ),
       (in, features) -> features.polygon("layer")
         .setZoomRange(0, 2)
-        .setBufferPixels(0)
+        .setBufferPixels(1)
     );
   }
 
@@ -2908,8 +2924,13 @@ class PlanetilerTests {
     assertEquals(bboxResult.tiles, polyResult.tiles);
   }
 
-  @Test
-  void testSimplePolygon() throws Exception {
+  @ParameterizedTest
+  @CsvSource({
+    "RETAIN_IMPORTANT_POINTS",
+    "RETAIN_EFFECTIVE_AREAS",
+    "RETAIN_WEIGHTED_EFFECTIVE_AREAS",
+  })
+  void testSimplePolygon(SimplifyMethod strategy) throws Exception {
     List<Coordinate> points = z14PixelRectangle(0, 40);
 
     var results = runWithReaderFeatures(
@@ -2920,6 +2941,8 @@ class PlanetilerTests {
       (in, features) -> features.polygon("layer")
         .setZoomRange(0, 14)
         .setBufferPixels(0)
+        .setPixelTolerance(1)
+        .setSimplifyMethod(strategy)
         .setMinPixelSize(10) // should only show up z14 (40) z13 (20) and z12 (10)
     );
 
@@ -3067,6 +3090,17 @@ class PlanetilerTests {
     int z8tiles = 1 << 8;
     assertFalse(polyResultz8.tiles.containsKey(TileCoord.ofXYZ(z8tiles * 3 / 4, z8tiles * 5 / 8, 8)));
     assertTrue(polyResultz8.tiles.containsKey(TileCoord.ofXYZ(z8tiles * 3 / 4, z8tiles * 7 / 8, 8)));
+  }
+
+  @Test
+  void testDefaultLanguages() {
+    var planetiler = Planetiler.create(Arguments.of("languages", "default,en"))
+      .setDefaultLanguages(List.of("jbo", "tlh"));
+    var translations = planetiler.translations();
+    assertTrue(translations.careAboutLanguage("jbo"));
+    assertTrue(translations.careAboutLanguage("tlh"));
+    assertTrue(translations.careAboutLanguage("en"));
+    assertFalse(translations.careAboutLanguage("fr"));
   }
 
   @FunctionalInterface
