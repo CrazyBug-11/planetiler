@@ -421,10 +421,10 @@ public class GeoUtils {
     double maxLatRad = Math.toRadians(maxLat);
 
     // 计算瓦片宽度 (经度跨度)
-    double width = Math.toRadians(maxLon - minLon) * WORLD_RADIUS_METERS;
+    double width = Math.toRadians(maxLon - minLon) * WORLD_RADIUS_METERS_AT_EQUATOR;
 
     // 计算瓦片高度 (纬度跨度，考虑球面投影)
-    double height = WORLD_RADIUS_METERS * (Math.sin(maxLatRad) - Math.sin(minLatRad));
+    double height = WORLD_RADIUS_METERS_AT_EQUATOR * (Math.sin(maxLatRad) - Math.sin(minLatRad));
 
     // 返回瓦片的面积
     return Math.abs(width * height);

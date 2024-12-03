@@ -244,33 +244,6 @@ public class FeatureRenderer implements Consumer<FeatureCollector.Feature>, Clos
     writeTileFeatures(z, feature.getId(), feature, sliced, attrs, geom.getCoordinate());
   }
 
-  private int emitFilledTiles_labelGrid(long id, FeatureCollector.Feature feature, TiledGeometry sliced,
-    RenderedFeature.Group groupInfo) {
-    /*
-     * Optimization: large input polygons that generate many filled interior tiles (i.e. the ocean), the encoder avoids
-     * re-encoding if groupInfo and vector tile feature are == to previous values, so compute one instance at the start
-     * of each zoom level for this feature.
-     */
-    VectorTile.Feature vectorTileFeature = new VectorTile.Feature(
-      feature.getLayer(),
-      id,
-      FILL,
-      feature.getAttrsAtZoom(sliced.zoomLevel())
-    );
-
-    int emitted = 0;
-    for (TileCoord tile : sliced.getFilledTiles()) {
-      consumer.accept(new RenderedFeature(
-        tile,
-        vectorTileFeature,
-        feature.getSortKey(),
-        Optional.ofNullable(groupInfo)
-      ));
-      emitted++;
-    }
-    return emitted;
-  }
-
   private void writeTileFeatures(int zoom, long id, FeatureCollector.Feature feature, TiledGeometry sliced,
     Map<String, Object> attrs, Coordinate coordinate) {
     int emitted = 0;
