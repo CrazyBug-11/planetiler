@@ -4,7 +4,9 @@ import com.onthegomap.planetiler.collection.DoubleMinHeap;
 import java.util.function.Function;
 import org.locationtech.jts.geom.CoordinateSequence;
 import org.locationtech.jts.geom.Geometry;
+import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.LinearRing;
+import org.locationtech.jts.geom.MultiLineString;
 import org.locationtech.jts.geom.Polygon;
 import org.locationtech.jts.geom.util.GeometryTransformer;
 
@@ -146,6 +148,22 @@ public class VWSimplifier extends GeometryTransformer implements Function<Geomet
     }
     return simpResult;
   }
+
+  @Override
+  protected Geometry transformLineString(LineString geom, Geometry parent) {
+    if (geom.isEmpty()) {
+      return null;
+    }
+
+    CoordinateSequence simplifiedCoords = transformCoordinates(geom.getCoordinateSequence(), parent);
+    return simplifiedCoords.size() < 2 ? null : geom.getFactory().createLineString(simplifiedCoords);
+  }
+
+  @Override
+  protected Geometry transformMultiLineString(MultiLineString geom, Geometry parent) {
+    return geom.isEmpty() ? null : super.transformMultiLineString(geom, parent);
+  }
+
 
   private static double triangleArea(double ax, double ay, double bx, double by, double cx, double cy) {
     return Math.abs(((ay - cy) * (bx - cx) + (by - cy) * (cx - ax)) / 2);

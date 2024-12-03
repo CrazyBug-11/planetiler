@@ -488,6 +488,68 @@ public class GeoUtils {
   }
 
 
+  /**
+   * 计算 EPSG:4326 坐标系下的线要素真实地理长度（单位：米）
+   */
+  public static double calculateRealLength(Geometry geometry) {
+    if (geometry instanceof LineString lineString) {
+      return calculateLineStringLength(lineString);
+    } else if (geometry instanceof MultiLineString multiLineString) {
+      double totalLength = 0.0;
+      for (int i = 0; i < multiLineString.getNumGeometries(); i++) {
+        totalLength += calculateLineStringLength((LineString) multiLineString.getGeometryN(i));
+      }
+      return totalLength;
+    } else {
+      return 0.0;
+    }
+  }
+
+  /**
+   * 计算单条 LineString 的球面长度
+   */
+  private static double calculateLineStringLength(LineString lineString) {
+    double length = 0.0;
+    Coordinate[] coords = lineString.getCoordinates();
+
+    // 遍历所有连续的点，计算每一段线段的长度
+    for (int i = 0; i < coords.length - 1; i++) {
+      Coordinate p1 = coords[i];
+      Coordinate p2 = coords[i + 1];
+
+      double lon1 = Math.toRadians(p1.x);
+      double lat1 = Math.toRadians(p1.y);
+      double lon2 = Math.toRadians(p2.x);
+      double lat2 = Math.toRadians(p2.y);
+
+      // 使用 Haversine 公式计算两点之间的距离
+      length += haversine(lon1, lat1, lon2, lat2);
+    }
+
+    return length;
+  }
+
+  /**
+   * 计算两点之间的球面距离（单位：米）
+   *
+   * @param lon1 经度1（弧度）
+   * @param lat1 纬度1（弧度）
+   * @param lon2 经度2（弧度）
+   * @param lat2 纬度2（弧度）
+   * @return 两点之间的球面距离（单位：米）
+   */
+  private static double haversine(double lon1, double lat1, double lon2, double lat2) {
+    double dlon = lon2 - lon1;
+    double dlat = lat2 - lat1;
+
+    double a = Math.sin(dlat / 2) * Math.sin(dlat / 2) +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dlon / 2) * Math.sin(dlon / 2);
+    double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return WORLD_RADIUS_METERS_AT_EQUATOR * c;
+  }
+
+
   /** Returns the length in pixels for a given number of meters on a 256x256 px tile at the given {@code zoom} level. */
   public static double metersToPixelAtEquator(int zoom, double meters) {
     return meters / metersPerPixelAtEquator(zoom);

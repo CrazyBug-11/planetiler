@@ -2491,9 +2491,9 @@ class PlanetilerTests {
 
   @ParameterizedTest
   @ValueSource(strings = {
-    " --minzoom=13 --maxzoom=14 "
+    " --minzoom=12 --maxzoom=14 "
       + " --output=G:\\数据\\1.六大类数据\\1.矢量\\parquet\\地类图斑_安康市\\FeatureEnvelope\\FeatureEnvelope.mbtiles "
-      + " --is_rasterize=true --pixelation_zoom=-1  --rasterize_min_zoom=0 --rasterize_max_zoom=13 --rasterize_area_threshold=4"
+      + " --is_rasterize=true --pixelation_zoom=-1  --rasterize_min_zoom=0 --rasterize_max_zoom=12 --rasterize_area_threshold=4"
       + " --outputType=mbtiles  --temp_nodes=F:\\test --temp_multipolygons=E:\\test --tile_weights=D:\\Project\\Java\\server-code\\src\\main\\resources\\planetiler\\tile_weights.tsv.gz  --force"
 //      + " -oosSavePath=E:\\Linespace\\SceneMapServer\\Data\\parquet --oosCorePoolSize=4 --oosMaxPoolSize=4 --bucketName=linespace --accessKey=linespace_test --secretKey=linespace_test --endpoint=http://123.139.158.75:9325 ",
   })
@@ -2514,7 +2514,7 @@ class PlanetilerTests {
         double area;
         try {
           // v1.0 取真实面积
-          area = GeoUtils.calculateRealAreaLatLon(source.latLonGeometry());
+          area = GeoUtils.calculateRealAreaLatLon(source.latLonGeometry().getEnvelope());
         } catch (Exception e) {
           LOGGER.error("计算要素真实面积异常", e);
           area = 0.0;
@@ -2553,7 +2553,7 @@ class PlanetilerTests {
         double area;
         try {
           // v2.0 去包络框面积
-          area = GeoUtils.calculateRealAreaLatLon(source.latLonGeometry().getEnvelope());
+          area = GeoUtils.calculateRealAreaLatLon(source.latLonGeometry());
         } catch (Exception e) {
           LOGGER.error("计算要素真实面积异常", e);
           area = 0.0;
@@ -2570,12 +2570,12 @@ class PlanetilerTests {
   @ParameterizedTest
   @ValueSource(strings = {
     " --minzoom=0 --maxzoom=14 "
-      + " --output=G:\\数据\\六大类数据\\1.矢量\\parquet\\陕西POI\\POI\\default.mbtiles --layer_name=shanxi-poi  "
-//      + "  --label_grid_pixel_size=12=8,5=1 --label_grid_limit=12=10 "
+      + " --output=G:\\数据\\1.六大类数据\\1.矢量\\parquet\\陕西POI\\POI\\default.mbtiles --layer_name=shanxi-poi  "
+      + "  --label_grid_pixel_size=12=1 --label_grid_limit=12=2 "
       + " --outputType=mbtiles  --temp_nodes=F:\\test --temp_multipolygons=E:\\test --tile_weights=D:\\Project\\Java\\server-code\\src\\main\\resources\\planetiler\\tile_weights.tsv.gz -oosSavePath=E:\\Linespace\\SceneMapServer\\Data --oosCorePoolSize=4 --oosMaxPoolSize=4 --bucketName=linespace --accessKey=linespace_test --secretKey=linespace_test --endpoint=http://123.139.158.75:9325 --force",
   })
   void testPlanetilerRunnerParquetPOI(String args) throws Exception {
-    String basePath = "G:\\数据\\六大类数据\\1.矢量\\parquet\\陕西POI";
+    String basePath = "G:\\数据\\1.六大类数据\\1.矢量\\parquet\\陕西POI";
     String tempDir = basePath + "\\POI";
     String outputPath = basePath + "\\POI\\default.mbtiles";
     List<Path> inputPaths = Stream.of(basePath + "\\陕西POI.parquet").map(Paths::get).toList();
@@ -2608,7 +2608,7 @@ class PlanetilerTests {
     mediumClassMap.put("地铁", 30);
     priorityLevelsMap.put("中类", mediumClassMap);
 
-    Poi.PoiTilingConfig poiTilingConfig = new Poi.PoiTilingConfig(priorityLevelsMap, zoomLevelMap, null, false);
+    Poi.PoiTilingConfig poiTilingConfig = new Poi.PoiTilingConfig(null, null, null, false);
 
     Planetiler planetiler = Planetiler.create(Arguments.fromArgs(
       (args + " --tmpdir=" + tempDir).split("\\s+")));
@@ -2625,6 +2625,44 @@ class PlanetilerTests {
     }
   }
 
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+    " --minzoom=12 --maxzoom=14 "
+      + " --pixelation_grid_size_overrides=8=512,4=1024 " // --simplify_tolerance=1
+      + " --output=G:\\数据\\1.六大类数据\\1.矢量\\parquet\\道路\\台湾\\line-one-dou1\\line-one-dou1.mbtiles "
+      + " --is_rasterize=true --pixelation_zoom=-1  --rasterize_min_zoom=0 --rasterize_max_zoom=12 "
+      + " --outputType=mbtiles  --temp_nodes=F:\\test --temp_multipolygons=E:\\test --tile_weights=D:\\Project\\Java\\server-code\\src\\main\\resources\\planetiler\\tile_weights.tsv.gz  --force"
+  })
+  void testPlanetilerRunnerParquetLine(String args) throws Exception {
+    String basePath = "G:\\数据\\1.六大类数据\\1.矢量\\parquet\\道路\\台湾";
+    String tempDir = basePath + "\\line-one-dou1";
+    String outputPath = basePath + "\\line-one-dou1\\line-one-dou1.mbtiles";
+    List<Path> inputPaths = Stream.of(basePath + "\\台湾.parquet").map(Paths::get).toList();
+
+    Planetiler planetiler = Planetiler.create(Arguments.fromArgs(
+      (args + " --tmpdir=" + tempDir).split("\\s+")));
+    planetiler
+      .setProfile((source, features) -> {
+        FeatureCollector.Feature feature = features.anyGeometry("linespace_layer")
+          .setPixelToleranceAtMaxZoom(0)
+          .setMinPixelSizeAtMaxZoom(0);
+
+        double length;
+        try {
+          length = GeoUtils.calculateRealLength(source.latLonGeometry());
+        } catch (Exception e) {
+          LOGGER.error("计算要素真实面积异常", e);
+          length = 0.0;
+        }
+
+        source.tags().forEach(feature::setAttr);
+        feature.setAttr(TileMergeRunnable.LINESPACE_LENG, length);
+      })
+      .addParquetSource("parquet", inputPaths, false, null, props -> props.get("linespace_layer"))
+      .setOutput(outputPath)
+      .run();
+  }
 
   private void updateMetadata(Mbtiles mbtiles, Map<String, HashSet<String>> geomTypes) {
     Mbtiles.Metadata metadata = mbtiles.metadataTable();
