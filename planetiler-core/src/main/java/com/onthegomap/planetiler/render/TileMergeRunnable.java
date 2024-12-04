@@ -211,7 +211,7 @@ public class TileMergeRunnable implements Runnable {
       TileEncodingResult result = new TileEncodingResult(tileCoord, Gzip.gzip(encode),
         OptionalLong.empty());
       if (encode.length > config.tileWarningSizeBytes()) {
-        LOGGER.warn("{} {}kb uncompressed", tileCoord, encode.length / 1024);
+        LOGGER.warn("{} {}kb uncompressed, TileMergeRunnable", tileCoord, encode.length / 1024);
       }
 
       LOGGER.info("[merged {}]size={} -> {}, count={} -> {}", tileCoord, totalSize, result.tileData().length, from, to);
@@ -237,7 +237,8 @@ public class TileMergeRunnable implements Runnable {
 
       } else if (geometryType.equalsIgnoreCase(Geometry.TYPENAME_LINESTRING) || geometryType.equalsIgnoreCase(
         Geometry.TYPENAME_MULTILINESTRING)) {
-        simplifiedGeometry = new VWSimplifier().setTolerance(getDistanceTolerance()).apply(originalGeometry);
+        simplifiedGeometry = new VWSimplifier().setTolerance(getDistanceTolerance(originalGeometry))
+          .apply(originalGeometry);
         if (simplifiedGeometry == null || !simplifiedGeometry.isValid() || simplifiedGeometry.isEmpty()) {
           if (simplifiedGeometry instanceof MultiLineString multiLineString) {
             List<LineString> result = new ArrayList<>();
@@ -273,7 +274,6 @@ public class TileMergeRunnable implements Runnable {
         continue;
       }
 
-      // 创建简化后的GeometryWithTag
       simplifiedGeometries.add(
         new GeometryWithTag(
           geometryWithTag.layer(),
@@ -323,30 +323,47 @@ public class TileMergeRunnable implements Runnable {
   /**
    * 默认简化阈值
    */
-  private double getDistanceTolerance() {
+  private double getDistanceTolerance(Geometry geometry) {
     int z = tileCoord.z();
     double tolerance = config.getPixelToleranceAtZoom(z);
+    double baseTolerance;
     if (tolerance != -1d) {
-      return tolerance;
+      // 256网格集被扩大到4096, 因此需要将容差扩大
+      baseTolerance = (tolerance * tolerance) * 256;
+    } else {
+      baseTolerance = getBaseTolerance();
     }
 
+//    return baseTolerance;
+    double length = geometry.getLength();
+    int vertexCount = geometry.getNumPoints();
+
+    //TODO 使用平方根进行非线性平滑 考虑引入曲率信息 ? 对极端情况设置更精细的阈值 ?
+    double complexityFactor = Math.sqrt(length / vertexCount);
+    return baseTolerance * Math.min(complexityFactor, 10.0);
+  }
+
+  /**
+   * TODO 基础容差：根据缩放层级设定的默认容差（瓦片像素²单位）。 基础容差需要大量数据测试
+   */
+  private double getBaseTolerance() {
+    int z = tileCoord.z();
     if (z >= 14) {
       return 0d;
     } else if (z >= 12) {
-      return 64d;
+      return 8 * 8d; // 0.25
     } else if (z >= 10) {
-      return 8d;
+      return 16 * 16d; // 1
     } else if (z >= 8) {
-      return 4;
+      return 16 * 32d; // 2
     } else if (z >= 6) {
-      return 1d;
+      return 32 * 32d; // 4
     } else if (z >= 4) {
-      return 0.1d;
+      return 32d * 64; // 8
     } else {
-      return 0d;
+      return 64 * 64d; //16
     }
   }
-
 
   // 拓扑验证方法保持不变
   private boolean isValidSimplifiedGeometry(Geometry original, Geometry simplified) {
@@ -618,7 +635,7 @@ public class TileMergeRunnable implements Runnable {
 
         List<Integer> sortList = getSortList(list, set);
         if (!sortList.isEmpty()) {
-          GeometryWithTag geometryWithTag = list.get(sortList.getLast());
+          GeometryWithTag geometryWithTag = list.get(sortList.getFirst());
 
           // 记录首尾点与要素索引的映射
 //          Map<Coordinate, List<Integer>> endpointIndex = new HashMap<>();
