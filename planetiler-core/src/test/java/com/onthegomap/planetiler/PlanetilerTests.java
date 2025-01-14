@@ -2531,13 +2531,13 @@ class PlanetilerTests {
   @ParameterizedTest
   @ValueSource(strings = {
     " --minzoom=13 --maxzoom=14 "
-      + " --output=G:\\数据\\1.六大类数据\\1.矢量\\parquet\\dltb\\FeatureRealArea\\FeatureRealArea.mbtiles "
+      + " --output=F:\\数据\\六大类数据\\矢量\\parquet\\dltb\\FeatureRealArea\\FeatureRealArea.mbtiles "
       + " --is_rasterize=true --pixelation_zoom=-1  --rasterize_min_zoom=0 --rasterize_max_zoom=13 --rasterize_area_threshold=4"
       + " --outputType=mbtiles  --temp_nodes=F:\\test --temp_multipolygons=E:\\test --tile_weights=D:\\Project\\Java\\server-code\\src\\main\\resources\\planetiler\\tile_weights.tsv.gz  --force"
 //      + " -oosSavePath=E:\\Linespace\\SceneMapServer\\Data\\parquet --oosCorePoolSize=4 --oosMaxPoolSize=4 --bucketName=linespace --accessKey=linespace_test --secretKey=linespace_test --endpoint=http://123.139.158.75:9325 ",
   })
   void testPlanetilerRunnerParquetWithFeatureRealArea(String args) throws Exception {
-    String basePath = "G:\\数据\\1.六大类数据\\1.矢量\\parquet\\dltb";
+    String basePath = "F:\\数据\\六大类数据\\矢量\\parquet\\dltb";
     String tempDir = basePath + "\\FeatureRealArea";
     String outputPath = basePath + "\\FeatureRealArea\\FeatureRealArea.mbtiles";
     List<Path> inputPaths = Stream.of(basePath + "\\dltb.parquet").map(Paths::get).toList();
@@ -2550,13 +2550,18 @@ class PlanetilerTests {
           .setPixelToleranceAtAllZooms(0)
           .setMinPixelSizeAtAllZooms(0);
 
-        double area;
+        double area = 0.0;
         try {
-          // v2.0 去包络框面积
-          area = GeoUtils.calculateRealAreaLatLon(source.latLonGeometry());
+          if (StringUtils.isNotBlank("TBMJ")) {
+            Object value = source.tags().get("TBMJ");
+            area = (value instanceof Number)
+              ? Double.parseDouble(value.toString())
+              : GeoUtils.calculateRealAreaLatLon(source.latLonGeometry());
+          } else {
+            area = GeoUtils.calculateRealAreaLatLon(source.latLonGeometry());
+          }
         } catch (Exception e) {
-          LOGGER.error("计算要素真实面积异常", e);
-          area = 0.0;
+          System.out.println("计算要素真实面积异常" + e);
         }
 
         source.tags().forEach(feature::setAttr);
