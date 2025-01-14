@@ -434,12 +434,12 @@ public class TileMergeRunnable implements Runnable {
       }
     } catch (NumberFormatException ignore) {
     }
-    try {
-      if (feature.hasTag(SHAPE_AREA)) {
-        shapeArea = Double.parseDouble(feature.getTag(SHAPE_AREA).toString());
-      }
-    } catch (NumberFormatException ignore) {
-    }
+//    try {
+//      if (feature.hasTag(SHAPE_AREA)) {
+//        shapeArea = Double.parseDouble(feature.getTag(SHAPE_AREA).toString());
+//      }
+//    } catch (NumberFormatException ignore) {
+//    }
     return shapeArea;
   }
 
@@ -451,12 +451,12 @@ public class TileMergeRunnable implements Runnable {
       }
     } catch (NumberFormatException ignore) {
     }
-    try {
-      if (feature.hasTag(SHAPE_LENG)) {
-        shapeLength = Double.parseDouble(feature.getTag(SHAPE_LENG).toString());
-      }
-    } catch (NumberFormatException ignore) {
-    }
+//    try {
+//      if (feature.hasTag(SHAPE_LENG)) {
+//        shapeLength = Double.parseDouble(feature.getTag(SHAPE_LENG).toString());
+//      }
+//    } catch (NumberFormatException ignore) {
+//    }
     return shapeLength;
   }
 
