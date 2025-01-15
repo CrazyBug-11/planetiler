@@ -99,7 +99,8 @@ public record PlanetilerConfig(
   Map<String, Map<String, Integer>> priorityLevelsMap,
   Map<String, Map<String, Integer>> zoomLevelsMap,
   String sortField,
-  boolean isAsc
+  boolean isAsc,
+  int gridGeometryMaxCount
 ) {
 
   public static final int MIN_MINZOOM = 0;
@@ -357,7 +358,9 @@ public record PlanetilerConfig(
       priorityLevelsMap,
       zoomLevelsMap,
       sortField,
-      isAsc
+      isAsc,
+      arguments.getInteger("grid_geometry_max_count", "Number of parallel threads to use when downloading each file",
+        10)
     );
   }
 

@@ -19,9 +19,11 @@ import com.onthegomap.planetiler.util.CloseableIterator;
 import com.onthegomap.planetiler.util.Gzip;
 import com.onthegomap.planetiler.util.TagUtils;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +31,7 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import org.apache.commons.codec.digest.MurmurHash3;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.CoordinateSequence;
 import org.locationtech.jts.geom.Envelope;
@@ -56,6 +59,8 @@ public class TileMergeRunnable implements Runnable {
   public static final String SHAPE_AREA = "Shape_Area";
   public static final String LINESPACE_LENG = "Linespace_Leng";
   public static final String SHAPE_LENG = "Shape_Leng";
+
+  public static final String GROUP_KEY = "DLBM";
 
   private static final int EXTENT = 4096;
 
@@ -410,10 +415,15 @@ public class TileMergeRunnable implements Runnable {
         if (!transformationGeom.isEmpty()) {
           double shapeArea = getShapeArea(feature, transformationGeom);
           double shapeLength = getShapeLength(feature, transformationGeom);
+          int hashCode = MurmurHash3.hash32x86(feature.tags().toString().getBytes(StandardCharsets.UTF_8));
+          String hash = String.valueOf(hashCode);
+          if (feature.tags().containsKey(GROUP_KEY)) {
+            hash = feature.tags().get(GROUP_KEY).toString();
+          }
           GeometryWithTag geometryWithTags =
             new GeometryWithTag(feature.layer(), feature.id(), feature.tags(),
               feature.group(),
-              transformationGeom, feature.geometry().commands().length, shapeArea, feature.tags().toString(),
+              transformationGeom, feature.geometry().commands().length, shapeArea, hash,
               shapeLength);
           originFeatureInfos.computeIfAbsent(feature.layer(), k -> new ArrayList<>())
             .add(geometryWithTags);
@@ -739,20 +749,26 @@ public class TileMergeRunnable implements Runnable {
 //    }
     double ratio = Math.max((double) totalSize / (double) maxSize, 1.0); // 表示需要压缩多少倍数据
     int offset = Math.min((int) ratio, gridSizeArray.length - 1); // 避免超出范围
+    Map<String, Double> groupArea = new HashMap<>();
     STRtree envelopeIndex = new STRtree();
     // 将要素添加到R树中
     // TODO: 要素大小排序后，做个数量限制
     for (int i = 0; i < list.size(); i++) {
       Geometry geometry = list.get(i).geometry();
+      Double areaOrDefault = groupArea.getOrDefault(list.get(i).hash, 0.0);
+      areaOrDefault += list.get(i).area;
+      groupArea.put(list.get(i).hash(), areaOrDefault);
       Envelope env = geometry.getEnvelopeInternal().copy();
       envelopeIndex.insert(env, i);
     }
+    double groupSum = groupArea.values().stream().reduce(0.0, Double::sum);
     // 保存要素+标签
     List<GeometryWithTag> result = new ArrayList<>();
     int gridWidth = gridEntity.getGridWidth();
     Geometry[][] vectorGrid = gridEntity.getVectorGrid();
 
     int maxExtend = EXTENT + GridEntity.BUFFER;
+    int totalGrid = maxExtend * maxExtend;
     for (int i = -GridEntity.BUFFER; i < maxExtend; i += gridWidth) {
       for (int j = -GridEntity.BUFFER; j < maxExtend; j += gridWidth) {
         int arrayI = i + GridEntity.BUFFER;
@@ -773,32 +789,42 @@ public class TileMergeRunnable implements Runnable {
             }
           }
         });
-        List<Integer> sortArea = set.stream().sorted(Comparator.comparingDouble(x -> list.get(x).area())).toList();
+        List<Integer> sortArea = set.stream().sorted(
+          Comparator.comparingDouble(x -> list.get(x).area() * (groupArea.get(list.get(x).hash) / groupSum))).toList();
         if (!sortArea.isEmpty()) {
           // 找到真实面积最大的瓦片，当前像素归属到
           Integer geoIndex = sortArea.getLast();
           GeometryWithTag geometryWithTag = list.get(geoIndex);
+          Double v = groupArea.getOrDefault(list.get(geoIndex).hash, list.get(geoIndex).area) - (list.get(geoIndex).area
+            / totalGrid);
+          groupArea.put(list.get(geoIndex).hash, v);
 
           // 计算像素与要素的比值
           double areaRatio = gridArea / geometryWithTag.area;
-          Geometry gridGeometry;
           if (areaRatio < config.rasterizeAreaThreshold() || config.rasterizeMaxZoom() - 1 == z) {
             // TODO: 处理边界裁剪 当像素膨胀率小于指定值或者当前层级为栅格化最大层级时  直接使用单位大小的像素
-            gridGeometry = geometry;
-            GeometryWithTag resultGeom = new GeometryWithTag(geometryWithTag.layer, geometryWithTag.id,
-              geometryWithTag.tags, geometryWithTag.group, gridGeometry, geometryWithTag.size, geometryWithTag.area,
-              geometryWithTag.hash, geometryWithTag.length);
-            result.add(resultGeom);
-
+            mergeGeo(geometry, geometryWithTag, result);
           } else {
-            for (Integer integer : sortArea) {
-              result.add(list.get(integer));
+            // 相交数量面积
+            if (sortArea.size() > config.gridGeometryMaxCount()) {
+              mergeGeo(geometry, geometryWithTag, result);
+            } else {
+              for (Integer integer : sortArea) {
+                result.add(list.get(integer));
+              }
             }
           }
         }
       }
     }
     return result;
+  }
+
+  private static void mergeGeo(Geometry geometry, GeometryWithTag geometryWithTag, List<GeometryWithTag> result) {
+    GeometryWithTag resultGeom = new GeometryWithTag(geometryWithTag.layer, geometryWithTag.id,
+      geometryWithTag.tags, geometryWithTag.group, geometry, geometryWithTag.size, geometryWithTag.area,
+      geometryWithTag.hash, geometryWithTag.length);
+    result.add(resultGeom);
   }
 
   /**
