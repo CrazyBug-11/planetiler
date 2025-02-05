@@ -2346,7 +2346,7 @@ class PlanetilerTests {
   @ParameterizedTest
   @ValueSource(strings = {
     " --small_Feat_Strategy=square --minzoom=14 --maxzoom=14 --pixelation_grid_size_overrides=12=512 "
-      + "--output=H:/100数据/Parquet\\default-14\\default-14.mbtiles"
+      + "--output=F:/100数据/Parquet\\default-14\\default-14.mbtiles --write_to_file=true"
       + " --is_rasterize=true --pixelation_zoom=-1  --rasterize_min_zoom=0 --rasterize_max_zoom=14"
       + " --outputType=mbtiles  --temp_nodes=F:\\test --temp_multipolygons=E:\\test --tile_weights=D:\\Project\\Java\\server-code\\src\\main\\resources\\planetiler\\tile_weights.tsv.gz "
       + " -oosSavePath=H:\\100数据\\output --oosCorePoolSize=4 --oosMaxPoolSize=4 --bucketName=linespace --accessKey=linespace_test --secretKey=linespace_test --endpoint=http://123.139.158.75:9325 --force",
@@ -2356,7 +2356,7 @@ class PlanetilerTests {
 //    String tempDir = basePath + "\\mergeSmallFeatures";
 //    String outputPath = basePath + "\\mergeSmallFeatures\\mergeSmallFeatures.mbtiles";
 //    List<Path> inputPaths = Stream.of(basePath + "\\xian.parquet").map(Paths::get).toList();
-    String basePath = "H:/100数据/Parquet/";
+    String basePath = "F:/100数据/Parquet/";
     String tempDir = basePath + "\\default-14";
     String outputPath = basePath + "\\default-14\\default-14.mbtiles";
     List<Path> inputPaths = Stream.of(basePath + "\\dltb.parquet").map(Paths::get).toList();
@@ -2389,21 +2389,21 @@ class PlanetilerTests {
 
   @ParameterizedTest
   @ValueSource(strings = {
-    " --small_Feat_Strategy=square --minzoom=14 --maxzoom=14 --pixelation_grid_size_overrides=12=512 "
-      + "--output=H:/100数据/Parquet\\guangdong-14\\guangdong-14.mbtiles"
-      + " --is_rasterize=true --pixelation_zoom=-1  --rasterize_min_zoom=0 --rasterize_max_zoom=14"
+    " --small_Feat_Strategy=square --minzoom=14 --maxzoom=14 --pixelation_grid_size_overrides=12=256 "
+      + "--output=F:/100数据/Parquet\\dltb-simple\\dltb-simple.mbtiles --rasterize_area_threshold=1"
+      + " --is_rasterize=true --pixelation_zoom=-1  --rasterize_min_zoom=0 --rasterize_max_zoom=14 --max_features=10000"
       + " --outputType=mbtiles  --temp_nodes=F:\\test --temp_multipolygons=E:\\test --tile_weights=D:\\Project\\Java\\server-code\\src\\main\\resources\\planetiler\\tile_weights.tsv.gz "
-      + " -oosSavePath=H:\\100数据\\output --oosCorePoolSize=4 --oosMaxPoolSize=4 --bucketName=linespace --accessKey=linespace_test --secretKey=linespace_test --endpoint=http://123.139.158.75:9325 --force",
+      + " -oosSavePath=F:\\100数据\\output --oosCorePoolSize=4 --oosMaxPoolSize=4 --bucketName=linespace --accessKey=linespace_test --secretKey=linespace_test --endpoint=http://123.139.158.75:9325 --force",
   })
   void testPlanetilerRunnerParquetGuandong(String args) throws Exception {
 //    String basePath = "E:\\Linespace\\SceneMapServer\\Data\\parquet\\xian";
 //    String tempDir = basePath + "\\mergeSmallFeatures";
 //    String outputPath = basePath + "\\mergeSmallFeatures\\mergeSmallFeatures.mbtiles";
 //    List<Path> inputPaths = Stream.of(basePath + "\\xian.parquet").map(Paths::get).toList();
-    String basePath = "H:/100数据/Parquet/";
-    String tempDir = basePath + "\\guangdong-14";
-    String outputPath = basePath + "\\guangdong-14\\guangdong-14.mbtiles";
-    List<Path> inputPaths = Stream.of(basePath + "\\guangdong-latest-multipolygons.parquet").map(Paths::get).toList();
+    String basePath = "F:/100数据/Parquet/";
+    String tempDir = basePath + "\\dltb-simple";
+    String outputPath = basePath + "\\dltb-simple\\dltb-simple.mbtiles";
+    List<Path> inputPaths = Stream.of(basePath + "\\dltb.parquet").map(Paths::get).toList();
 
     Planetiler planetiler = Planetiler.create(Arguments.fromArgs(
       (args + " --tmpdir=" + tempDir).split("\\s+")));

@@ -4,8 +4,10 @@ import static org.locationtech.jts.geom.LinearRing.MINIMUM_VALID_SIZE;
 
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.VectorTile;
+import com.onthegomap.planetiler.archive.ReadableTileArchive;
 import com.onthegomap.planetiler.archive.Tile;
 import com.onthegomap.planetiler.archive.TileEncodingResult;
+import com.onthegomap.planetiler.archive.WriteableTileArchive;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
@@ -15,6 +17,7 @@ import com.onthegomap.planetiler.geo.TileCoord;
 import com.onthegomap.planetiler.geo.VWSimplifier;
 import com.onthegomap.planetiler.mbtiles.Mbtiles;
 import com.onthegomap.planetiler.stats.DefaultStats;
+import com.onthegomap.planetiler.stream.StreamArchiveConfig;
 import com.onthegomap.planetiler.util.CloseableIterator;
 import com.onthegomap.planetiler.util.Gzip;
 import com.onthegomap.planetiler.util.TagUtils;
@@ -76,9 +79,9 @@ public class TileMergeRunnable implements Runnable {
 
   private final TileCoord tileCoord;
 
-  private final Mbtiles mbtiles;
+  private final ReadableTileArchive reader;
 
-  private final Mbtiles.TileWriter writer;
+  private final WriteableTileArchive.TileWriter writer;
 
   private final PlanetilerConfig config;
 
@@ -139,10 +142,10 @@ public class TileMergeRunnable implements Runnable {
 ////    int a = 0;
 //  }
 
-  public TileMergeRunnable(TileCoord tileCoord, Mbtiles mbtiles, Mbtiles.TileWriter writer, PlanetilerConfig config,
+  public TileMergeRunnable(TileCoord tileCoord, ReadableTileArchive reader, Mbtiles.TileWriter writer, PlanetilerConfig config,
     GridEntity gridEntity) {
     this.tileCoord = tileCoord;
-    this.mbtiles = mbtiles;
+    this.reader = reader;
     this.writer = writer;
     this.config = config;
     this.gridEntity = gridEntity;
@@ -172,7 +175,7 @@ public class TileMergeRunnable implements Runnable {
     int maxChildX = x * 2 + 1;
     int minChildY = (currentMaxY - y) * 2;  // 翻转Y坐标并计算最小Y
     int maxChildY = (currentMaxY - y) * 2 + 1;  // 翻转Y坐标并计算最大Y
-    try (CloseableIterator<Tile> tileIterator = mbtiles.getZoomTiles(z + 1, minChildX, minChildY, maxChildX,
+    try (CloseableIterator<Tile> tileIterator = reader.getZoomTiles(z + 1, minChildX, minChildY, maxChildX,
       maxChildY)) {
       // 1.读取要素，拼接要素
       long totalSize = 0;
@@ -590,7 +593,7 @@ public class TileMergeRunnable implements Runnable {
     String geometryType = list.getFirst().geometry().getGeometryType();
     if (geometryType.equalsIgnoreCase(Geometry.TYPENAME_POLYGON) || geometryType.equalsIgnoreCase(
       Geometry.TYPENAME_MULTIPOLYGON)) {
-      return mergePolygon(list, (double) totalSize, (double) maxSize, z);
+      return groupPolygonMerge(list, (double) totalSize, (double) maxSize, z);
 
     } else if (geometryType.equalsIgnoreCase(Geometry.TYPENAME_LINESTRING) || geometryType.equalsIgnoreCase(
       Geometry.TYPENAME_MULTILINESTRING)) {
@@ -742,6 +745,60 @@ public class TileMergeRunnable implements Runnable {
       }).toList();
   }
 
+  /**
+   * 分组合并算法
+   *
+   * @param list      瓦片的要素
+   * @param totalSize 瓦片大小
+   * @param maxSize   瓦片约束
+   * @param z         层级
+   * @return 合并后的要素
+   */
+  private List<GeometryWithTag> groupPolygonMerge(List<GeometryWithTag> list, double totalSize, double maxSize, int z) {
+    // 表示需要压缩多少倍数据
+    double ratio = Math.max(totalSize / maxSize, 1.0);
+    if (ratio <= 1.0) {
+      return list;
+    }
+    // 按城市分组
+    Map<String, List<GeometryWithTag>> groupedByHash = list.stream()
+      .collect(Collectors.groupingBy(GeometryWithTag::hash));
+    // 数量上尽量保留更多，提升简化的效果
+    List<GeometryWithTag> sums = new ArrayList<>();
+    for (Map.Entry<String, List<GeometryWithTag>> entry : groupedByHash.entrySet()) {
+      String key = entry.getKey();
+      List<GeometryWithTag> values = entry.getValue();
+      // 按面积排序
+      values.sort(Comparator.comparingDouble(o -> o.area));
+      // 面积求和
+      long sum = values.stream().mapToLong(GeometryWithTag::size).sum();
+      // 是否压缩
+      long thresh = (long) (sum - sum / ratio);
+
+      List<GeometryWithTag> merged = new ArrayList<>();
+      long mergedSize = 0;
+      for (GeometryWithTag geometryWithTag : values) {
+        mergedSize += geometryWithTag.size;
+        merged.add(geometryWithTag);
+        if (mergedSize > thresh) {
+          break;
+        }
+      }
+      sums.addAll(values.subList(merged.size(), values.size()));
+      LOGGER.error("[processTile] {} : groupPolygonMerge group={}, merged={}", tileCoord, key, merged.size());
+    }
+    return sums;
+  }
+
+  /**
+   * 全要素合并算法
+   *
+   * @param list
+   * @param totalSize
+   * @param maxSize
+   * @param z
+   * @return
+   */
   private List<GeometryWithTag> mergePolygon(List<GeometryWithTag> list, double totalSize,
     double maxSize, int z) {
     //    if (totalSize <= maxSize) {

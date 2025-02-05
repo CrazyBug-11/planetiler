@@ -4,7 +4,9 @@ import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.Profile;
 import com.onthegomap.planetiler.VectorTile;
+import com.onthegomap.planetiler.archive.ReadableTileArchive;
 import com.onthegomap.planetiler.archive.Tile;
+import com.onthegomap.planetiler.archive.TileArchiveConfig;
 import com.onthegomap.planetiler.archive.TileArchiveMetadata;
 import com.onthegomap.planetiler.archive.TileArchives;
 import com.onthegomap.planetiler.archive.TileEncodingResult;
@@ -12,6 +14,7 @@ import com.onthegomap.planetiler.archive.WriteableTileArchive;
 import com.onthegomap.planetiler.config.Arguments;
 import com.onthegomap.planetiler.config.Bounds;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
+import com.onthegomap.planetiler.files.WriteableFilesArchive;
 import com.onthegomap.planetiler.geo.DouglasPeuckerSimplifier;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
@@ -24,6 +27,7 @@ import com.onthegomap.planetiler.util.CloseableIterator;
 import com.onthegomap.planetiler.util.Gzip;
 import com.onthegomap.planetiler.util.JsonUitls;
 import com.onthegomap.planetiler.util.ZoomFunction;
+import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.file.Paths;
@@ -109,12 +113,25 @@ public class AdvancedLandCoverTile implements Profile {
       // 断点续切，获取当前最大的数据ID
       int tileDataIdCounter = mbtiles.getMaxDataTileId() + 1;
       LOGGER.info("TileDataId={}", tileDataIdCounter);
+      String prePath = config.tmpDir().toFile().getAbsolutePath() + File.separator + "Protobuf";
+      TileArchiveConfig archiveConfig = TileArchiveConfig.from(prePath);
+      WriteableTileArchive tileArchive = TileArchives.newWriter(archiveConfig, config);
       for (int zoom = config.rasterizeMaxZoom() - 1; zoom >= config.rasterizeMinZoom(); zoom--) {
         try (Mbtiles.TileWriter writer = mbtiles.newTileWriter()) {
           writer.setTileDataIdCounter(tileDataIdCounter);
 
           // 初始化网格集
           gridEntityCache.getOrCreateGridEntity(getPixelationGridSizeAtZoom(zoom));
+          ReadableTileArchive reader = mbtiles;
+          WriteableTileArchive.TileWriter tileWriter = writer;
+          if (config.writeToFile()) {
+            // 从文件中读取
+            tileWriter = tileArchive.newTileWriter();
+            if (zoom != config.rasterizeMaxZoom() - 1) {
+              // 最后一层从mbtiles中读取
+              reader = TileArchives.newReader(archiveConfig, config);
+            }
+          }
 
 //          initPixelSize(zoom);
 
@@ -124,7 +141,7 @@ public class AdvancedLandCoverTile implements Profile {
 //          }
 
 //        processTileBatch(zoom, 0, 0, 0, 0, writer);
-          processZoomLevel(zoom, writer);
+          processZoomLevel(zoom, reader, tileWriter);
           Field field = Mbtiles.BatchedCompactTileWriter.class.getDeclaredField("tileDataIdCounter");
           field.setAccessible(true);
           if (writer instanceof Mbtiles.BatchedCompactTileWriter batchedCompactTileWriter) {
@@ -133,6 +150,8 @@ public class AdvancedLandCoverTile implements Profile {
               tileDataIdCounter = (int) o;
               tileDataIdCounter++;
             }
+          } else if (writer instanceof WriteableFilesArchive) {
+            writer.close();
           }
         } catch (Exception e) {
           LOGGER.error(e.getMessage(), e);
@@ -179,7 +198,7 @@ public class AdvancedLandCoverTile implements Profile {
    * @param z
    * @param writer
    */
-  public void processZoomLevel(int z, Mbtiles.TileWriter writer) {
+  public void processZoomLevel(int z, ReadableTileArchive reader, Mbtiles.TileWriter writer) {
     LOGGER.info("开始处理缩放级别 {}", z);
     long startTime = System.currentTimeMillis();
     Bounds bounds = config.bounds();
@@ -203,7 +222,7 @@ public class AdvancedLandCoverTile implements Profile {
     LOGGER.info("处理缩放级别 {} 的父瓦片范围：X({} to {}), Y({} to {}) (TMS)", z, minParentX, maxParentX, minParentY,
       maxParentY);
     // 控制并发的版本
-    processByParentTiles(z, writer);
+    processByParentTiles(z, reader, writer);
 
     // 第一个版本
 //    beforeParentTiles(z, writer, minParentX, maxParentX, tileBatchSize, minParentY, maxParentY, currentMaxY, highZoom, highMaxY,
@@ -242,8 +261,8 @@ public class AdvancedLandCoverTile implements Profile {
     }
   }
 
-  private void processByParentTiles(int z, Mbtiles.TileWriter writer) {
-    CloseableIterator<TileCoord> allTileCoords = mbtiles.getAllTileCoords();
+  private void processByParentTiles(int z, ReadableTileArchive reader, Mbtiles.TileWriter writer) {
+    CloseableIterator<TileCoord> allTileCoords = reader.getAllTileCoords();
     Set<TileCoord> tileCoords = allTileCoords.stream().filter(tileCoord -> tileCoord.z() == z + 1)
       .collect(Collectors.toSet());
     Set<TileCoord> parents = new HashSet<>();
@@ -253,7 +272,7 @@ public class AdvancedLandCoverTile implements Profile {
     LOGGER.info("start process tile [{}] count={}", z, parents.size());
     List<TileCoord> todoParent = new ArrayList<>();
     for (TileCoord parent : parents) {
-      byte[] tile = mbtiles.getTile(parent.x(), parent.y(), parent.z());
+      byte[] tile = reader.getTile(parent.x(), parent.y(), parent.z());
       if (tile == null) {
         todoParent.add(parent);
       }
@@ -274,7 +293,7 @@ public class AdvancedLandCoverTile implements Profile {
     Runnable runnable = () -> {
       for (TileCoord parent : todoParent) {
         try {
-          TileMergeRunnable tileMergeRunnable = new TileMergeRunnable(parent, mbtiles, writer, config, gridEntity);
+          TileMergeRunnable tileMergeRunnable = new TileMergeRunnable(parent, reader, writer, config, gridEntity);
           // 阻塞队列，保证并发数量，内存不会暴增
           queue.put(tileMergeRunnable);
         } catch (Exception e) {

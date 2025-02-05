@@ -2,6 +2,7 @@ package com.onthegomap.planetiler.files;
 
 import com.google.common.base.Preconditions;
 import com.onthegomap.planetiler.archive.ReadableTileArchive;
+import com.onthegomap.planetiler.archive.Tile;
 import com.onthegomap.planetiler.archive.TileArchiveMetadata;
 import com.onthegomap.planetiler.archive.TileArchiveMetadataDeSer;
 import com.onthegomap.planetiler.config.Arguments;
@@ -12,6 +13,8 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -93,6 +96,29 @@ public class ReadableFilesArchive implements ReadableTileArchive {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  @Override
+  public CloseableIterator<Tile> getZoomTiles(int z, int startX, int startY, int endX, int endY) {
+    List<Tile> tiles = new ArrayList<>();
+    try {
+      for (int x = startX; x <= endX; x++) {
+        for (int rawy = startY; rawy <= endY; rawy++) {
+          TileCoord t = TileCoord.ofXYZ(x, (1 << z) - 1 - rawy, z);
+          try {
+            byte[] tile = getTile(x, (1 << z) - 1 - rawy, z);
+            if (tile != null) {
+              tiles.add(new Tile(t, tile));
+            }
+          } catch (Exception ignored) {
+
+          }
+        }
+      }
+    } catch (Exception e) {
+
+    }
+    return CloseableIterator.of(tiles.stream());
   }
 
   @Override

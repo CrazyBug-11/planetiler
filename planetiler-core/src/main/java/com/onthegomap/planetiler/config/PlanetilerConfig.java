@@ -100,7 +100,8 @@ public record PlanetilerConfig(
   Map<String, Map<String, Integer>> zoomLevelsMap,
   String sortField,
   boolean isAsc,
-  int gridGeometryMaxCount
+  int gridGeometryMaxCount,
+  boolean writeToFile
 ) {
 
   public static final int MIN_MINZOOM = 0;
@@ -360,7 +361,8 @@ public record PlanetilerConfig(
       sortField,
       isAsc,
       arguments.getInteger("grid_geometry_max_count", "Number of parallel threads to use when downloading each file",
-        10)
+        10),
+      arguments.getBoolean("write_to_file", "是否将切片写入pbf文件中", false)
     );
   }
 
