@@ -17,7 +17,6 @@ import com.onthegomap.planetiler.geo.TileCoord;
 import com.onthegomap.planetiler.geo.VWSimplifier;
 import com.onthegomap.planetiler.mbtiles.Mbtiles;
 import com.onthegomap.planetiler.stats.DefaultStats;
-import com.onthegomap.planetiler.stream.StreamArchiveConfig;
 import com.onthegomap.planetiler.util.CloseableIterator;
 import com.onthegomap.planetiler.util.Gzip;
 import com.onthegomap.planetiler.util.TagUtils;
@@ -89,11 +88,17 @@ public class TileMergeRunnable implements Runnable {
 
   private final double gridArea;
 
+  private final int deltaZ;
+
+  private final double tileScale;
+
+  private final int tileLength;
+
   Map<String, List<GeometryWithTag>> originFeatureInfos = new ConcurrentHashMap<>();
 
   private final GeometryFactory geometryFactory = new GeometryFactory();
 
-  record GeometryWithTag(
+  public record GeometryWithTag(
     String layer,
     long id,
     Map<String, Object> tags,
@@ -105,44 +110,8 @@ public class TileMergeRunnable implements Runnable {
     double length
   ) {}
 
-//  private static final Geometry[][] VECTOR_GRID = new Geometry[EXTENT][EXTENT];
-//  private static final int GRID_WIDTH = EXTENT / GRID_SIZE;
-//
-//  static {
-//    // 初始化一个网格
-//    for (int i = 0; i < gridSizeArray.length; i++) {
-//      gridEntities[i] = new GridEntity(gridSizeArray[i]);
-//    }
-//    List<Geometry> geometryList = new ArrayList<>();
-//    GeometryFactory geometryFactory = JTSFactoryFinder.getGeometryFactory();
-//    for (int i = 0; i < EXTENT; i += GRID_WIDTH) {
-//      VECTOR_GRID[i] = new Geometry[EXTENT];
-//      for (int j = 0; j < EXTENT; j += GRID_WIDTH) {
-//        // 创建GeometryFactory实例
-//        // 创建地理点
-//        if (GRID_WIDTH == 1) {
-//          Coordinate coord = new Coordinate(i, j);
-//          Point point = geometryFactory.createPoint(coord);
-//          VECTOR_GRID[i][j] = point;
-//        } else {
-//          MutableCoordinateSequence sequence = new MutableCoordinateSequence();
-//          sequence.addPoint(i, j);
-//          sequence.addPoint(i, j + GRID_WIDTH);
-//          sequence.addPoint(i + GRID_WIDTH, j + GRID_WIDTH);
-//          sequence.addPoint(i + GRID_WIDTH, j);
-//          sequence.addPoint(i, j);
-//          Polygon polygon = geometryFactory.createPolygon(sequence);
-//          VECTOR_GRID[i][j] = polygon;
-//          geometryList.add(polygon);
-//        }
-//      }
-//    }
-////    GeometryCollection gridView = geometryFactory.createGeometryCollection(
-////      geometryList.toArray(new Geometry[geometryList.size()]));
-////    int a = 0;
-//  }
-
-  public TileMergeRunnable(TileCoord tileCoord, ReadableTileArchive reader, Mbtiles.TileWriter writer, PlanetilerConfig config,
+  public TileMergeRunnable(TileCoord tileCoord, ReadableTileArchive reader, Mbtiles.TileWriter writer,
+    PlanetilerConfig config,
     GridEntity gridEntity) {
     this.tileCoord = tileCoord;
     this.reader = reader;
@@ -155,6 +124,9 @@ public class TileMergeRunnable implements Runnable {
     } else {
       this.gridArea = 0.0d;
     }
+    this.deltaZ = config.deltaZ().apply(tileCoord.z()).intValue();
+    this.tileLength = TransformUtils.pow2(deltaZ);
+    this.tileScale = TransformUtils.division2(TILE_SCALE, deltaZ);
   }
 
   public TileCoord getTileCoord() {
@@ -170,12 +142,12 @@ public class TileMergeRunnable implements Runnable {
     int currentMaxY = (1 << z) - 1;
 
     // 计算子瓦片的范围 (XYZ坐标)
-    int minChildX = x * 2;
+    int minChildX = x * tileLength;
     // + 1 的作用是确保计算出的范围包括了父级瓦片对应的所有子级瓦片，覆盖了父级瓦片的整个高度。 -1因为索引从零开始
-    int maxChildX = x * 2 + 1;
-    int minChildY = (currentMaxY - y) * 2;  // 翻转Y坐标并计算最小Y
-    int maxChildY = (currentMaxY - y) * 2 + 1;  // 翻转Y坐标并计算最大Y
-    try (CloseableIterator<Tile> tileIterator = reader.getZoomTiles(z + 1, minChildX, minChildY, maxChildX,
+    int maxChildX = x * tileLength + tileLength - 1;
+    int minChildY = (currentMaxY - y) * tileLength;  // 翻转Y坐标并计算最小Y
+    int maxChildY = (currentMaxY - y) * tileLength + tileLength - 1;  // 翻转Y坐标并计算最大Y
+    try (CloseableIterator<Tile> tileIterator = reader.getZoomTiles(z + deltaZ, minChildX, minChildY, maxChildX,
       maxChildY)) {
       // 1.读取要素，拼接要素
       long totalSize = 0;
@@ -477,14 +449,16 @@ public class TileMergeRunnable implements Runnable {
    * 仿真变换
    */
   private Geometry simulationTransformation(Geometry geometry, TileCoord childTile) throws GeometryException {
-    int relativeX = childTile.x() & 1;
-    int relativeY = childTile.y() & 1;
+    int beginX = tileCoord.x() * tileLength;
+    int beginY = tileCoord.y() * tileLength;
+    int relativeX = childTile.x() - beginX;
+    int relativeY = childTile.y() - beginY;
 
     AffineTransformation transform = new AffineTransformation();
-    double translateX = relativeX * EXTENT * TILE_SCALE;
-    double translateY = relativeY * EXTENT * TILE_SCALE;
+    double translateX = relativeX * (EXTENT * tileScale);
+    double translateY = relativeY * (EXTENT * tileScale);
 
-    Geometry geom = transform.scale(TILE_SCALE, TILE_SCALE).translate(translateX, translateY).transform(geometry);
+    Geometry geom = transform.scale(tileScale, tileScale).translate(translateX, translateY).transform(geometry);
     if (geom.isEmpty()) {
       LOGGER.error("仿真变换后要素为空！");
     }
@@ -644,67 +618,9 @@ public class TileMergeRunnable implements Runnable {
           }
         });
 
-//        List<Integer> sortLength = set.stream().sorted(Comparator.comparingDouble(x -> list.get(x).length())).toList();
-
         List<Integer> sortList = getSortList(list, set);
         if (!sortList.isEmpty()) {
           GeometryWithTag geometryWithTag = list.get(sortList.getFirst());
-
-          // 记录首尾点与要素索引的映射
-//          Map<Coordinate, List<Integer>> endpointIndex = new HashMap<>();
-//
-//          // 遍历 sortLength 中的要素，记录首尾点
-//          for (int index : sortLength) {
-//            Geometry geom = list.get(index).geometry();
-//            Coordinate start = geom.getCoordinates()[0];
-//            Coordinate end = geom.getCoordinates()[geom.getCoordinates().length - 1];
-//
-//            endpointIndex.computeIfAbsent(start, k -> new ArrayList<>()).add(index);
-//            endpointIndex.computeIfAbsent(end, k -> new ArrayList<>()).add(index);
-//          }
-//
-//          // 保存需要保留的要素索引
-//          Set<Integer> toBeSaved = new HashSet<>();
-//          Queue<Integer> queue = new LinkedList<>();
-//          toBeSaved.add(sortLength.getLast());
-//          queue.add(sortLength.getLast());
-//
-//          // 递归处理与已保存要素完全相连的要素
-//          while (!queue.isEmpty()) {
-//            int currentIndex = queue.poll();
-//            Geometry currentGeometry = list.get(currentIndex).geometry();
-//            Coordinate currentStart = currentGeometry.getCoordinates()[0];
-//            Coordinate currentEnd = currentGeometry.getCoordinates()[currentGeometry.getCoordinates().length - 1];
-//
-//            for (Coordinate endpoint : List.of(currentStart, currentEnd)) {
-//              List<Integer> connectedFeatures = endpointIndex.getOrDefault(endpoint, Collections.emptyList());
-//              for (int connectedIndex : connectedFeatures) {
-//                if (!toBeSaved.contains(connectedIndex)) {
-//                  Geometry connectedGeometry = list.get(connectedIndex).geometry();
-//                  Coordinate connectedStart = connectedGeometry.getCoordinates()[0];
-//                  Coordinate connectedEnd = connectedGeometry.getCoordinates()[connectedGeometry.getCoordinates().length
-//                    - 1];
-//
-//                  // 判断两条线段是否完全相连
-//                  boolean isConnected = endpoint.equals(connectedStart) || endpoint.equals(connectedEnd);
-//                  if (isConnected) {
-//                    toBeSaved.add(connectedIndex);
-//                    queue.add(connectedIndex);
-//                  }
-//                }
-//              }
-//            }
-//          }
-//
-//          for (int index : sortLength) {
-//            if (toBeSaved.contains(index)) {
-//              GeometryWithTag geometryWithTag1 = list.get(index);
-//              if (!processedFeatures.contains(geometryWithTag1.geometry().hashCode())) {
-//                processedFeatures.add(geometryWithTag1.geometry().hashCode());
-//                result.add(geometryWithTag1);
-//              }
-//            }
-//          }
 
           if (processedFeatures.contains(geometryWithTag.geometry.hashCode())) {
             continue;
@@ -755,39 +671,51 @@ public class TileMergeRunnable implements Runnable {
    * @return 合并后的要素
    */
   private List<GeometryWithTag> groupPolygonMerge(List<GeometryWithTag> list, double totalSize, double maxSize, int z) {
-    // 表示需要压缩多少倍数据
-    double ratio = Math.max(totalSize / maxSize, 1.0);
-    if (ratio <= 1.0) {
+    // 计算压缩比例
+    double compressionRatio = Math.max(totalSize / maxSize, 1.0);
+    if (compressionRatio <= 1.0) {
       return list;
     }
-    // 按城市分组
-    Map<String, List<GeometryWithTag>> groupedByHash = list.stream()
-      .collect(Collectors.groupingBy(GeometryWithTag::hash));
-    // 数量上尽量保留更多，提升简化的效果
-    List<GeometryWithTag> sums = new ArrayList<>();
-    for (Map.Entry<String, List<GeometryWithTag>> entry : groupedByHash.entrySet()) {
-      String key = entry.getKey();
-      List<GeometryWithTag> values = entry.getValue();
-      // 按面积排序
-      values.sort(Comparator.comparingDouble(o -> o.area));
-      // 面积求和
-      long sum = values.stream().mapToLong(GeometryWithTag::size).sum();
-      // 是否压缩
-      long thresh = (long) (sum - sum / ratio);
 
-      List<GeometryWithTag> merged = new ArrayList<>();
-      long mergedSize = 0;
-      for (GeometryWithTag geometryWithTag : values) {
-        mergedSize += geometryWithTag.size;
-        merged.add(geometryWithTag);
-        if (mergedSize > thresh) {
+    // 按hash分组
+    Map<String, List<GeometryWithTag>> groupedFeatures = list.stream()
+      .collect(Collectors.groupingBy(GeometryWithTag::hash));
+
+    List<GeometryWithTag> resultFeatures = new ArrayList<>();
+
+    // 处理每个分组
+    for (Map.Entry<String, List<GeometryWithTag>> group : groupedFeatures.entrySet()) {
+      String groupKey = group.getKey();
+      List<GeometryWithTag> groupFeatures = group.getValue();
+
+      // 按面积降序排序
+      groupFeatures.sort((a, b) -> Double.compare(b.area, a.area));
+
+      // 计算分组总大小和阈值
+      long groupTotalSize = groupFeatures.stream()
+        .mapToLong(GeometryWithTag::size)
+        .sum();
+      long sizeThreshold = (long) (groupTotalSize - groupTotalSize / compressionRatio);
+
+      // 保留大于阈值的要素
+      long accumulatedSize = 0;
+      int retainedCount = 0;
+      for (GeometryWithTag feature : groupFeatures) {
+        accumulatedSize += feature.size();
+        if (accumulatedSize > sizeThreshold) {
           break;
         }
+        retainedCount++;
       }
-      sums.addAll(values.subList(merged.size(), values.size()));
-      LOGGER.error("[processTile] {} : groupPolygonMerge group={}, merged={}", tileCoord, key, merged.size());
+
+      // 添加未被合并的要素
+      resultFeatures.addAll(groupFeatures.subList(retainedCount, groupFeatures.size()));
+
+      LOGGER.error("[processTile] {} : groupPolygonMerge group={}, merged={}",
+        tileCoord, groupKey, retainedCount);
     }
-    return sums;
+
+    return resultFeatures;
   }
 
   /**

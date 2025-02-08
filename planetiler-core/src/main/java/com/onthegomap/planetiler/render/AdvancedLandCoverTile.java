@@ -199,7 +199,8 @@ public class AdvancedLandCoverTile implements Profile {
    * @param writer
    */
   public void processZoomLevel(int z, ReadableTileArchive reader, Mbtiles.TileWriter writer) {
-    LOGGER.info("开始处理缩放级别 {}", z);
+    int deltaZ = config.deltaZ().apply(z).intValue();
+    LOGGER.info("开始处理缩放级别 {}: deltaZ={}", z, deltaZ);
     long startTime = System.currentTimeMillis();
     Bounds bounds = config.bounds();
     TileExtents.ForZoom currentZoom = bounds.tileExtents().getForZoom(z);
