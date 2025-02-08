@@ -210,7 +210,7 @@ public record PlanetilerConfig(
     boolean isRasterize = arguments.getBoolean("is_rasterize", "是否栅格化", false);
     List<String> mergeFields = arguments.getList("merge_fields", "要素合并属性字段", Collections.emptyList());
     int tileBatchSize = arguments.getInteger("tile_batch_size", "栅格化批量处理大小 ", 100);
-    long maxFeatures = arguments.getLong("max_features", "每个图块的瓦片大小", (long) 1024 * 1024);
+    long maxFeatures = arguments.getLong("max_features", "每个图块的瓦片大小", (long) 10 * 1024 * 1024);
     int renderMaxzoom =
       arguments.getInteger("render_maxzoom", "maximum rendering zoom level up to " + MAX_MAXZOOM,
         Math.max(maxzoom, DEFAULT_MAXZOOM));

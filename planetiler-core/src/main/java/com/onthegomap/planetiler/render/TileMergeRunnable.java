@@ -46,6 +46,7 @@ import org.locationtech.jts.geom.MultiLineString;
 import org.locationtech.jts.geom.MultiPoint;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.Polygon;
+import org.locationtech.jts.geom.PrecisionModel;
 import org.locationtech.jts.geom.util.AffineTransformation;
 import org.locationtech.jts.index.strtree.STRtree;
 import org.slf4j.Logger;
@@ -547,7 +548,8 @@ public class TileMergeRunnable implements Runnable {
        * See https://docs.mapbox.com/vector-tiles/specification/#simplification for issues that can arise from naive
        * coordinate rounding.
        */
-      geom = GeoUtils.snapAndFixPolygon(geom, DefaultStats.get(), "render");
+      PrecisionModel precisionModel = new PrecisionModel(EXTENT / 256d);
+      geom = GeoUtils.snapAndFixPolygon(geom, precisionModel, DefaultStats.get(), "render");
       // JTS utilities "fix" the geometry to be clockwise outer/CCW inner but vector tiles flip Y coordinate,
       // so we need outer CCW/inner clockwise
       geom = geom.reverse();
